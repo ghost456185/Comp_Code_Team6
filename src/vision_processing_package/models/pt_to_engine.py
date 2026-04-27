@@ -9,7 +9,7 @@ from ultralytics import YOLO
 
 
 MODEL_PT_PATH = Path(
-	'/home/development-robot/UofIHandBuiltRobot/src/vision_processing_package/models/Casey_Model_2026_04_23.pt'
+	'/home/me-cas-jetson04/Comp_Code_Team6/src/vision_processing_package/models/weights.pt'
 )
 EXPORT_DEVICE = 0
 

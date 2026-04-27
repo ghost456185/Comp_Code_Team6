@@ -1,0 +1,23 @@
+{
+  "exported_at_utc": "2026-04-24T19:36:30.885708+00:00",
+  "files": {
+    "pt": "/home/me-cas-jetson04/Comp_Code_Team6/src/vision_processing_package/models/weights.pt",
+    "engine": "/home/me-cas-jetson04/Comp_Code_Team6/src/vision_processing_package/models/weights.engine"
+  },
+  "export": {
+    "format": "engine",
+    "device": 0,
+    "half": true
+  },
+  "software": {
+    "torch": "2.8.0",
+    "ultralytics": "8.3.168",
+    "tensorrt": "10.3.0"
+  },
+  "gpu": {
+    "index": 0,
+    "name": "Orin",
+    "capability": "8.7",
+    "total_memory_bytes": 7990001664
+  }
+}
