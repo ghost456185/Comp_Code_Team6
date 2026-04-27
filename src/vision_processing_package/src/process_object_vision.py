@@ -93,8 +93,8 @@ class VisionInferenceService(Node):
             model_path = Path(model_path_param)
         else:
             package_root = Path(__file__).resolve().parents[1]
-            engine_path = package_root / 'models' / 'yolov8n.engine'
-            pt_path = package_root / 'models' / 'yolov8n.pt'
+            engine_path = package_root / 'models' / 'your_vision_model_here.engine'
+            pt_path = package_root / 'models' / 'your_vision_model_here.pt'
             model_path = engine_path if engine_path.exists() else pt_path
 
         if not model_path.exists():

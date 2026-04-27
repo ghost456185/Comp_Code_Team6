@@ -68,8 +68,9 @@ sudo apt install ros-humble-foxglove-bridge ros-humble-topic-tools
 
 ### 1.2 Build the workspace
 
+This guide assumes that the root of the workspace is located at ~/Project6_Class_Distro
 ```bash
-cd ~/Project6/UofIHandBuiltRobot
+cd ~/Project6_Class_Distro
 colcon build --symlink-install
 ```
 
@@ -78,16 +79,13 @@ underlying nodes being built and runnable.
 
 ### 1.3 Source the workspace
 
-Every new terminal needs both the ROS 2 underlay and the project
-overlay:
+Every new terminal needs the project overlay sourced. The ROS 2
+underlay is already sourced in your `.bashrc` and does not need to be
+repeated.
 
 ```bash
-source /opt/ros/humble/setup.bash
-source ~/Project6/UofIHandBuiltRobot/install/setup.bash
+source ~/Project6_Class_Distro/install/setup.bash
 ```
-
-Add both lines to `~/.bashrc` so new terminals come up sourced
-automatically.
 
 ### 1.4 Find the Jetson's IP address
 
@@ -96,7 +94,11 @@ hostname -I
 ```
 
 Note the first address (e.g. `192.168.1.42`). This is referred to as
-`<jetson-ip>` throughout this guide.
+`<jetson-ip>` throughout this guide.  You can set this up to either
+run on the wireless network (e.g. UI-DeviceNet) or ethernet.  If ethernet,
+ensure that the point-to-point connection has been configured and
+both devices are connected to the same cable; otherwise, the ethernet
+address will not appear.
 
 ### 1.5 Launch the bridge
 
@@ -135,9 +137,9 @@ You should see a log line like
 `[foxglove_bridge] Listening on 0.0.0.0:8765`. That confirms the
 WebSocket is ready for laptop connections.
 
-> If this is the first time anyone has opened port 8765 on this Jetson,
-> check your firewall. On Ubuntu:
-> `sudo ufw allow 8765/tcp` (only needed if `ufw` is enabled).
+> **Required:** The Jetsons have an active firewall. You must open
+> port 8765 before any laptop can connect:
+> `sudo ufw allow 8765/tcp`
 
 ---
 
@@ -162,19 +164,20 @@ mkdir -p ~/foxglove
 dpkg -x ~/Downloads/foxglove-studio-*.deb ~/foxglove
 ```
 
-This unpacks the application into `~/foxglove/opt/foxglove-studio/`.
+This unpacks the application into `~/foxglove/opt/Foxglove/`.
 
 ### 2.3 Launch Foxglove Studio
 
 ```bash
-~/foxglove/opt/foxglove-studio/foxglove-studio
+~/foxglove/opt/Foxglove/foxglove-studio --no-sandbox
 ```
 
 The application window should open. If you plan to use this regularly,
 create an alias in your `~/.bashrc`:
 
 ```bash
-echo 'alias foxglove="~/foxglove/opt/foxglove-studio/foxglove-studio"' >> ~/.bashrc
+echo 'alias foxglove="~/foxglove/opt/Foxglove/foxglove-studio --no-sandbox"'
+         >> ~/.bashrc
 source ~/.bashrc
 ```
 

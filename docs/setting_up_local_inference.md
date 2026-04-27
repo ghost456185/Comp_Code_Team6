@@ -220,7 +220,7 @@ pip install --force-reinstall 'opencv-contrib-python==4.10.*'
 pip uninstall -y opencv-python   # if it snuck in — conflicts with contrib
 ```
 
-After reinstalling, re-run the verification block.
+> **Note:** `pip` may report that `ultralytics` is missing `opencv-python` — this is expected and harmless; `opencv-contrib-python` satisfies the same need. After running any reinstalls above, re-run the verification block.
 
 ---
 
@@ -233,7 +233,7 @@ python3 - <<'PY'
 import torch, time
 from ultralytics import YOLO
 
-model = YOLO('Project5_WS/src/vision_processing_package/models/yolov8n.pt')
+model = YOLO('Project6_Class_Distro/src/vision_processing_package/models/your_vision_model_here.pt')
 print('device:', 'cuda' if torch.cuda.is_available() else 'cpu')
 
 dummy = torch.zeros(1, 3, 640, 640, device='cuda').half()
@@ -247,7 +247,7 @@ print(f'{avg_ms:.1f} ms / inference (avg of 10)')
 PY
 ```
 
-> **Run this from the repo root** (the parent of `Project5_WS/`).
+> **Run this from the repo root** (the parent of `Project6_Class_Distro/`).
 
 Expect roughly **20–60 ms** per inference for `yolov8n` at 640×640 in
 FP16. The TensorRT engine in the next step will improve the raw
@@ -260,7 +260,7 @@ frame times will be higher than the raw forward pass (see
 
 ## Step 5 — Export the TensorRT FP16 engine
 
-One-shot conversion of your custom-trained `your_roboflow_model.pt` into a
+One-shot conversion of your custom-trained `your_vision_model_here.pt` into a
 Jetson-specific `.engine` file. This runs the `.pt → .onnx → .engine`
 pipeline.
 
@@ -284,32 +284,32 @@ pipeline.
 From the repo root:
 
 ```bash
-python3 Project5_WS/src/vision_processing_package/scripts/export_yolo_engine.py
+python3 Project6_Class_Distro/src/vision_processing_package/models/pt_to_engine.py
 ```
 
-The script defaults to `models/your_roboflow_model.pt`. To export a different weights
-file:
+The script defaults to `models/your_vision_model_here.pt`. To export a different weights
+file (e.g. yolov8n.pt):
 
 ```bash
-python3 Project5_WS/src/vision_processing_package/scripts/export_yolo_engine.py \
-    Project5_WS/src/vision_processing_package/models/yolov8n.pt
+python3 Project6_Class_Distro/src/vision_processing_package/models/pt_to_engine.py \
+    Project6_Class_Distro/src/vision_processing_package/models/yolov8n.pt
 ```
 
 Expect **3–10 minutes** on Orin Nano. The output will look like:
 
 ```
-Loading .../your_roboflow_model.pt ...
+Loading .../your_vision_model_here.pt ...
 Exporting to TensorRT engine (imgsz=640, device=0, half=True) ...
 ONNX: export success ✅ ...
 TensorRT: starting export with TensorRT 10.3.0 ...
-TensorRT: building FP16 engine as .../your_roboflow_model.engine
+TensorRT: building FP16 engine as .../your_vision_model_here.engine
 ...
 TensorRT: export success ✅ ...
-Wrote: .../your_roboflow_model.engine
+Wrote: .../your_vision_model_here.engine
 ```
 
-The resulting `your_roboflow_model.engine` will be written next to the original
-`your_roboflow_model.pt` in the `models/` directory.
+The resulting `your_vision_model_here.engine` will be written next to the original
+`your_vision_model_here.pt` in the `models/` directory.
 
 ### What the warnings during export mean
 
@@ -435,5 +435,5 @@ print('numpy', numpy.__version__, '| cv2', cv2.__version__,
 
 # Step 5: export TensorRT FP16 engine (3–10 min on Orin Nano)
 sudo jetson_clocks   # optional: pin max clocks for faster + cleaner build
-python3 Project5_WS/src/vision_processing_package/scripts/export_yolo_engine.py
+python3 Project6_Class_Distro/src/vision_processing_package/models/pt_to_engine.py
 ```

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(command -v dot)",
+      "Bash(\"/c/Program Files/Graphviz/bin/dot\" -Tpng \"c:/GITHUB Repos/Project6/Project6_Class_Distro/docs/architecture.dot\" -o \"c:/GITHUB Repos/Project6/Project6_Class_Distro/docs/architecture.png\")",
+      "Bash(\"/c/Program Files/Graphviz/bin/dot\" -Tsvg \"c:/GITHUB Repos/Project6/Project6_Class_Distro/docs/architecture.dot\" -o \"c:/GITHUB Repos/Project6/Project6_Class_Distro/docs/architecture.svg\")",
+      "Bash(\"/c/Program Files/Graphviz/bin/dot\" -Tjson \"c:/GITHUB Repos/Project6/Project6_Class_Distro/docs/architecture.dot\" -o \"c:/GITHUB Repos/Project6/Project6_Class_Distro/docs/architecture.json\")",
+      "Bash(python -c ' *)",
+      "Bash(\"/c/Program Files/Graphviz/bin/dot\" -Tjson architecture.dot -o architecture.json)",
+      "Bash(python dot_to_drawio.py architecture.json architecture.drawio)",
+      "Bash(\"/c/Program Files/Graphviz/bin/dot\" -Tpng architecture.dot -o architecture.png)",
+      "Bash(\"/c/Program Files/Graphviz/bin/dot\" -Tsvg architecture.dot -o architecture.svg)",
+      "Bash(git rm *)"
+    ]
+  }
+}

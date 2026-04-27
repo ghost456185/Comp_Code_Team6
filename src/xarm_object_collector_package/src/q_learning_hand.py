@@ -18,7 +18,7 @@ class QLearningService(Node):
         """
         super().__init__('q_learning_service')
 
-        self.declare_parameter('q_table_filename', 'q_table.csv')
+        self.declare_parameter('q_table_filename', 'your_q_table_here.csv')
         self.q_table_filename = self.get_parameter('q_table_filename').value
 
         self.aspect_bins = None

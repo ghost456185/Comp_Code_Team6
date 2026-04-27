@@ -9,8 +9,8 @@ from launch_ros.actions import Node
 
 def generate_launch_description() -> LaunchDescription:
     wskr_share = Path(get_package_share_directory('wskr'))
-    floor_params = str(wskr_share / 'config' / 'floor_params.yaml')
-    lens_params = str(wskr_share / 'config' / 'lens_params.yaml')
+    floor_params = str(wskr_share / 'config' / 'your_floor_params.yaml')
+    lens_params = str(wskr_share / 'config' / 'your_lens_params.yaml')
     arduino_launch = str(
         Path(get_package_share_directory('arduino')) / 'launch' / 'arduino.launch.py'
     )

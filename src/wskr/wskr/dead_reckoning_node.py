@@ -25,6 +25,13 @@ dead-reckoning updates with ``heading -= yaw_rate * dt``.
 Topics:
     subscribes  /odom                                — robot yaw rate.
     subscribes  WSKR/heading_to_target/visual_obs    — fresh bbox heading.
+    subscribes  WSKR/dead_reckoning/enable           — latched Bool. False mutes
+                                                       the publishers (e.g. while
+                                                       a search supervisor wants
+                                                       to own heading_to_target).
+                                                       Internal fusion state keeps
+                                                       updating so a re-enable
+                                                       resumes from current truth.
     publishes   WSKR/heading_to_target               — fused heading (deg).
     publishes   WSKR/tracking_mode                   — ``visual`` or ``dead_reckoning``.
 """
@@ -37,7 +44,13 @@ from typing import Optional
 import rclpy
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from std_msgs.msg import Float32, String
+from rclpy.qos import (
+    QoSDurabilityPolicy,
+    QoSHistoryPolicy,
+    QoSProfile,
+    QoSReliabilityPolicy,
+)
+from std_msgs.msg import Bool, Float32, String
 
 from system_manager_package.constants import (
     DR_HANDOFF_DEG,
@@ -82,11 +95,24 @@ class DeadReckoningNode(Node):
         self._latest_visual_obs_t: Optional[float] = None
         self._latest_yaw_rate_rad_s = 0.0
         self._last_tick_t: Optional[float] = None
+        self._enabled = True
 
         self.visual_obs_sub = self.create_subscription(
             Float32, 'WSKR/heading_to_target/visual_obs', self._on_visual_obs, 10
         )
         self.odom_sub = self.create_subscription(Odometry, '/odom', self._on_odom, 20)
+
+        # Latched enable so a search supervisor that mutes us before this node
+        # finishes starting up still gets honored on first tick.
+        latched = QoSProfile(
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            history=QoSHistoryPolicy.KEEP_LAST,
+        )
+        self.enable_sub = self.create_subscription(
+            Bool, 'WSKR/dead_reckoning/enable', self._on_enable, latched
+        )
 
         self.heading_pub = self.create_publisher(Float32, 'WSKR/heading_to_target', 10)
         self.mode_pub = self.create_publisher(String, 'WSKR/tracking_mode', 10)
@@ -109,6 +135,15 @@ class DeadReckoningNode(Node):
     def _on_odom(self, msg: Odometry) -> None:
         """Cache the newest body-frame yaw rate from the Arduino odometry."""
         self._latest_yaw_rate_rad_s = float(msg.twist.twist.angular.z)
+
+    def _on_enable(self, msg: Bool) -> None:
+        """Mute / unmute the publishers without disturbing internal fusion state."""
+        new_state = bool(msg.data)
+        if new_state != self._enabled:
+            self.get_logger().info(
+                'dead_reckoning %s.' % ('unmuted' if new_state else 'muted')
+            )
+        self._enabled = new_state
 
     def _visual_obs_is_fresh(self, now: float) -> bool:
         """True if the last visual_obs is recent enough to trust."""
@@ -158,6 +193,11 @@ class DeadReckoningNode(Node):
                 self.get_logger().info(
                     'dead_reckoning → visual (snapped to %.1f°)' % self.heading_deg
                 )
+
+        # Internal fusion state above is always updated so a re-enable resumes
+        # from current truth. Only the publishes are gated by the mute flag.
+        if not self._enabled:
+            return
 
         heading_msg = Float32()
         heading_msg.data = float(self.heading_deg)

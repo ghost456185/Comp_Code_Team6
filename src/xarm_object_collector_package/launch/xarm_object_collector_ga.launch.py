@@ -4,24 +4,19 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-
-    # --- XArm access mode (uncomment ONE pair) ---
-    # Option A: service-based (recommended) — xarm_hardware_node owns the USB
-    #           and other nodes request motion via ROS2 services/actions.
+    # XArm access mode:
+    #   Default (recommended): xarm_hardware_node owns the USB device, and the
+    #       grasp action server + any other node call its services/action.
+    #   Backwards-compat: comment out the `xarm_hardware,` line in the return
+    #       tuple below. The hardware node will not start, and any node that
+    #       imports XARMController directly (Project-4 style) keeps working.
+    #       Don't run both at once — they will fight over the USB device.
     xarm_hardware = Node(
         package='xarm_object_collector_package',
         executable='xarm_hardware_node.py',
         name='xarm_hardware_node',
         output='both',
     )
-    # Option B: direct class import — the action server imports XARMController
-    #           itself.  Do NOT run both; they will fight over the USB device.
-    # xarm_hardware = Node(
-    #     package='xarm_object_collector_package',
-    #     executable='xarm_hardware_node.py',
-    #     name='xarm_hardware_node',
-    #     output='both',
-    # )
 
     xarm_action_commander = Node(
         package='xarm_object_collector_package',
@@ -38,7 +33,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        xarm_hardware,  # Comment out this line for Option B (direct class import)
+        xarm_hardware,  # ← comment out this line to skip xarm_hardware_node (BW-compat mode).
         xarm_action_commander,
         q_learning,
     ])

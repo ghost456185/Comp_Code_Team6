@@ -93,7 +93,7 @@ class WSKRRangeNode(Node):
 
         self.bridge = CvBridge()
 
-        default_cal = str(Path(get_package_share_directory('wskr')) / 'config' / 'Whisker_Calibration.json')
+        default_cal = str(Path(get_package_share_directory('wskr')) / 'config' / 'your_Whisker_Calibration.json')
         self.declare_parameter('calibration_file', default_cal)
         self.declare_parameter('max_range_mm', WHISKER_MAX_RANGE_MM)
         self.declare_parameter('sample_step_mm', WHISKER_SAMPLE_STEP_MM)

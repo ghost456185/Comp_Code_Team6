@@ -7,7 +7,7 @@ Nothing in here imports XARMController directly.
 """
 import time
 
-import nump#y as np
+import numpy as np
 import rclpy
 from rclpy.action import ActionClient, ActionServer
 from rclpy.callback_groups import ReentrantCallbackGroup

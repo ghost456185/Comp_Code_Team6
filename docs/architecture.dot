@@ -1,0 +1,168 @@
+// Project 6 — Hand-Built Robot architecture
+//
+// Render with:    dot -Tpng docs/architecture.dot -o docs/architecture.png
+// Or import into draw.io:  Arrange → Insert → Advanced → Graphviz
+//
+// Edge color legend:
+//     black  =  topic (publish/subscribe)
+//     red    =  action (goal/feedback/result)
+//     blue   =  service (request/response)
+
+digraph robot_arch {
+    rankdir=LR;
+    compound=true;
+    nodesep=0.35;
+    ranksep=0.7;
+    fontname="Helvetica";
+    splines=spline;
+
+    // height/width here are MINIMA in inches; they pad graphviz's layout so
+    // the larger draw.io boxes still fit without overlapping when this dot
+    // file is consumed by dot_to_drawio.py.
+    node  [shape=box, style="rounded,filled", fontname="Helvetica",
+           fontsize=10, fillcolor="#F5F7FA", color="#34495E",
+           width=2.6, height=1.3, margin="0.15,0.1"];
+    edge  [fontname="Helvetica", fontsize=8, color="black"];
+
+    // ============================================================
+    //  PACKAGES (clusters)
+    // ============================================================
+
+    subgraph cluster_arduino {
+        label=<<b>arduino</b><br/><i>Twist ↔ serial bridge to the mecanum base; publishes wheel odometry.</i>>;
+        style="rounded,filled"; fillcolor="#FFF4E5"; color="#C68A1B";
+        n_arduino [label=<<b>mecanum_serial_bridge</b><br/>Converts cmd_vel into Arduino V/X serial<br/>commands and integrates encoder deltas<br/>into nav_msgs/Odometry on /odom.>];
+    }
+
+    subgraph cluster_vision {
+        label=<<b>vision_processing_package</b><br/><i>Camera capture, YOLO inference, object selection, and bbox→XYZ mapping.</i>>;
+        style="rounded,filled"; fillcolor="#E7F3FF"; color="#1F6FB2";
+        n_cam   [label=<<b>gstreamer_camera</b><br/>Pulls JPEG frames from the USB webcam<br/>via GStreamer and republishes them as<br/>CompressedImage on camera1/image_raw.>];
+        n_yolo  [label=<<b>vision_inference_service</b><br/>Runs YOLO + ByteTrack on every camera<br/>frame and serves on-demand detection,<br/>property, and rotated-AR queries.>];
+        n_sel   [label=<<b>object_selection_node</b><br/>Picks the best detection from the latest<br/>YOLO frame using a class-priority list.>];
+        n_xyz   [label=<<b>bbox_to_xyz_node</b><br/>Maps a 2D bounding-box center into<br/>arm-frame millimetres using calibration.>];
+    }
+
+    subgraph cluster_wskr {
+        label=<<b>wskr</b><br/><i>Floor masking, whisker ranges, heading fusion, and the autopilot/approach pipeline.</i>>;
+        style="rounded,filled"; fillcolor="#E9F8EE"; color="#2D8A4E";
+        n_floor   [label=<<b>wskr_floor</b><br/>Builds a binary floor mask from the<br/>camera frame for use by whisker rays.>];
+        n_range   [label=<<b>wskr_range</b><br/>Marches 11 calibrated whisker rays over<br/>the floor mask and the tracked bbox to<br/>produce floor + target distance arrays.>];
+        n_dr      [label=<<b>wskr_dead_reckoning</b><br/>Fuses the latest visual heading with<br/>integrated yaw-rate from /odom and<br/>publishes mode + heading-to-target.>];
+        n_auto    [label=<<b>wskr_autopilot</b><br/>MLP that turns whisker fan + heading<br/>into a Twist on WSKR/cmd_vel.>];
+        n_approach[label=<<b>wskr_approach_action</b><br/>ApproachObject server: ArUco/CSRT<br/>tracking, autopilot gating, and the<br/>per-frame ArUco marker publisher.>];
+    }
+
+    subgraph cluster_xarm {
+        label=<<b>xarm_object_collector_package</b><br/><i>Single-owner xArm hardware node, GA-planned grasp pipeline, and Q-learning wrist policy.</i>>;
+        style="rounded,filled"; fillcolor="#F4ECFB"; color="#7A3FAE";
+        n_hw      [label=<<b>xarm_hardware_node</b><br/>Sole owner of the xArm USB device;<br/>exposes every controller method as a<br/>service plus a play_waypoints action.>];
+        n_grasp   [label=<<b>grasping_commander_action_node</b><br/>XArm grasp action server: chains<br/>perception, Q-learning, GA planning,<br/>and arm-control service calls.>];
+        n_q       [label=<<b>q_learning_wrist_node</b><br/>Looks up the best wrist angle for a<br/>given aspect ratio from a CSV policy.>];
+    }
+
+    subgraph cluster_sysmgr {
+        label=<<b>system_manager_package</b><br/><i>FSM supervisor and search behavior — student-implemented in this project.</i>>;
+        style="rounded,filled,dashed"; fillcolor="#FFF7E0"; color="#A07A00";
+        n_state   [label=<<b>state_manager_node</b><br/>FSM that drives one full collection<br/>cycle (search → select → approach →<br/>grasp → drop). <b>STUDENT TODO.</b>>, fillcolor="#FFE9A8"];
+        n_search  [label=<<b>search_supervisor</b><br/>WskrSearch action server: wanders<br/>while watching for toys / ArUco IDs.<br/><b>STUDENT TODO.</b>>, fillcolor="#FFE9A8"];
+    }
+
+    subgraph cluster_util {
+        label=<<b>utilities</b><br/><i>Foxglove WebSocket bridge, telemetry shims, and tuning GUIs.</i>>;
+        style="rounded,filled"; fillcolor="#F0F0F0"; color="#666666";
+        n_fxbridge [label=<<b>foxglove_bridge</b><br/>Streams ROS topics, params, and<br/>services to Foxglove Studio over a<br/>WebSocket on port 8765.>];
+        n_apprbr   [label=<<b>wskr_foxglove_approach_bridge</b><br/>Wraps the WSKR/XArm actions as plain<br/>services so the Foxglove dashboard<br/>can dispatch them.>];
+        n_webhelp  [label=<<b>wskr_web_helper</b><br/>Publishes one latched listing of the<br/>autopilot model files available on disk.>];
+        n_throttle [label=<<b>camera_throttle / overlay_throttle</b><br/>topic_tools republishers that drop image<br/>topics to dashboard-friendly rates.>];
+    }
+
+    // External I/O — robot_command from the dashboard / operator
+    n_extcmd [label="Foxglove dashboard\n(operator)", shape=note, fillcolor="#FAFAFA"];
+
+    // ============================================================
+    //  TOPICS (black)
+    // ============================================================
+
+    n_cam       -> n_floor    [label="camera1/image_raw\n/compressed"];
+    n_cam       -> n_yolo     [label="camera1/image_raw\n/compressed"];
+    n_cam       -> n_approach [label="camera1/image_raw\n/compressed"];
+    n_cam       -> n_throttle [label="camera1/image_raw\n/compressed"];
+
+    n_floor     -> n_range    [label="WSKR/floor_mask"];
+    n_floor     -> n_search   [label="WSKR/floor_mask"];
+
+    n_range     -> n_auto     [label="WSKR/whisker_lengths"];
+    n_range     -> n_approach [label="WSKR/whisker_lengths"];
+    n_range     -> n_search   [label="WSKR/whisker_lengths"];
+    n_range     -> n_auto     [label="WSKR/target_whisker_lengths"];
+    n_range     -> n_approach [label="WSKR/target_whisker_lengths"];
+    n_range     -> n_throttle [label="wskr_overlay/compressed"];
+
+    n_approach  -> n_dr       [label="WSKR/heading_to_target/visual_obs"];
+    n_approach  -> n_range    [label="WSKR/tracked_bbox"];
+    n_approach  -> n_search   [label="WSKR/aruco_markers"];
+    n_approach  -> n_auto     [label="WSKR/autopilot/enable\n(latched)"];
+    n_approach  -> n_yolo     [label="WSKR/yolo_streaming_enable"];
+    n_approach  -> n_arduino  [label="WSKR/cmd_vel\n(zero-stop)"];
+    n_approach  -> n_arduino  [label="WSKR/stop"];
+
+    n_dr        -> n_auto     [label="WSKR/heading_to_target"];
+    n_dr        -> n_approach [label="WSKR/heading_to_target"];
+    n_dr        -> n_auto     [label="WSKR/tracking_mode"];
+    n_dr        -> n_approach [label="WSKR/tracking_mode"];
+
+    n_auto      -> n_arduino  [label="WSKR/cmd_vel"];
+
+    n_arduino   -> n_dr       [label="/odom"];
+
+    n_yolo      -> n_sel      [label="vision/yolo/detections"];
+    n_yolo      -> n_search   [label="vision/yolo/detections"];
+    n_yolo      -> n_approach [label="vision/yolo/detections"];
+
+    n_sel       -> n_state    [label="vision/selected_object"];
+
+    n_search    -> n_auto     [label="WSKR/autopilot/enable"];
+    n_search    -> n_dr       [label="WSKR/heading_to_target\n(setpoint, see note)", style=dashed];
+
+    n_state     -> n_arduino  [label="WSKR/stop"];
+    n_state     -> n_extcmd   [label="robot_state", dir=back];
+    n_extcmd    -> n_state    [label="robot_command"];
+
+    n_webhelp   -> n_extcmd   [label="wskr_web/available_models", style=dashed];
+
+    // ============================================================
+    //  SERVICES (blue)
+    // ============================================================
+
+    edge [color="#1565C0", fontcolor="#1565C0"];
+
+    n_state    -> n_sel    [label="select_object_service\n(SelectObject)"];
+    n_state    -> n_hw     [label="open_gripper_service\n(Trigger)"];
+
+    n_grasp    -> n_yolo   [label="get_obj_properties_service\n(GetObjProperties)"];
+    n_yolo     -> n_xyz    [label="bbox_to_xyz_service\n(BboxToXYZ)"];
+    n_yolo     -> n_yolo   [label="detect_objects_service_v2\n(DetectObjectsV2)\nself-call for rotated AR"];
+
+    n_grasp    -> n_q      [label="analyze_table\n(QLearning)"];
+    n_grasp    -> n_hw     [label="xarm/set_joint_state\n(SetJointState)"];
+    n_grasp    -> n_hw     [label="xarm/move_joint\n(MoveJoint)"];
+    n_grasp    -> n_hw     [label="xarm/move_end_effector_count\n(MoveEndEffectorCount)"];
+    n_grasp    -> n_hw     [label="xarm/get_end_effector_count\n(GetEndEffectorCount)"];
+
+    n_apprbr   -> n_approach [label="WSKR/approach_object_start/cancel\n(ApproachObject/Trigger)"];
+    n_apprbr   -> n_search   [label="WSKR/search_behavior_start/cancel\n(StartSearch/Trigger)"];
+    n_apprbr   -> n_grasp    [label="xarm_grasp_start/cancel\n(StartGrasp/Trigger)"];
+
+    // ============================================================
+    //  ACTIONS (red)
+    // ============================================================
+
+    edge [color="#C62828", fontcolor="#C62828"];
+
+    n_state -> n_search   [label="WSKR/search_behavior\n(WskrSearch)"];
+    n_state -> n_approach [label="WSKR/approach_object\n(ApproachObject)"];
+    n_state -> n_grasp    [label="xarm_grasp_action\n(XArm)"];
+
+    n_grasp -> n_hw       [label="xarm/play_waypoints_dense\n(PlayWaypointsDense)"];
+}
