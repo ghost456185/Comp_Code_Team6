@@ -88,7 +88,7 @@ DR_PUBLISH_RATE_HZ = 10.0                        # fused heading publish rate (H
 # ║  WSKR — AUTOPILOT  (MLP-based reactive controller)            ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-AUTOPILOT_MODEL_FILENAME = 'your_MLP_model_here.json'  # trained MLP policy filename (in share/wskr/models/)
+AUTOPILOT_MODEL_FILENAME = '70%_Navigation.json'  # trained MLP policy filename (in share/wskr/models/)
 AUTOPILOT_WHISKER_COUNT = 11                    # number of whisker rays in the fan
 AUTOPILOT_STATE_DIM = 23                        # MLP input: 11 whiskers + 11 target whiskers + 1 heading
 AUTOPILOT_CONTROL_RATE_HZ = 10.0                 # inference/publish frequency (Hz); matches CAMERA_PUBLISH_HZ
@@ -98,7 +98,7 @@ AUTOPILOT_MAX_ANGULAR_RPS = math.radians(40.0)  # max rotation rate (rad/s, = 40
 AUTOPILOT_SPEED_SCALE = 1.0                     # global output scaling [0,1] applied to all motor commands
 AUTOPILOT_PROXIMITY_MAX_MM = 500.0              # distance where proximity attenuation = 1.0 (full speed)
 AUTOPILOT_PROXIMITY_MIN_MM = 100.0              # distance where proximity attenuation bottoms out
-AUTOPILOT_PROXIMITY_SPEED_MAX = 1.0             # drive speed scale at max distance
+AUTOPILOT_PROXIMITY_SPEED_MAX = 10.0             # drive speed scale at max distance
 AUTOPILOT_PROXIMITY_SPEED_MIN = 0.1             # drive speed scale floor at min distance
 
 # ╔══════════════════════════════════════════════════════════════════╗
@@ -129,7 +129,7 @@ YOLO_CONFIDENCE_THRESHOLD = 0.5                 # discard detections below this 
 YOLO_GPU_DEVICE = 0                             # CUDA device index
 YOLO_PUBLISH_HZ = 10.0                         # streaming detection publish rate (Hz)
 YOLO_TRACKER_YAML = 'bytetrack.yaml'            # ultralytics tracker config file
-YOLO_MODEL_PATH = ''                            # empty → fall back to your_vision_model_here.{engine,pt} in the vision package
+YOLO_MODEL_PATH = 'weights.engine'              # empty → fall back to your_vision_model_here.{engine,pt} in the vision package
 YOLO_ROTATION_TIMEOUT_SEC = 15.0                # timeout for rotated-inference service calls (s)
 YOLO_BBOX_TIMEOUT_SEC = 5.0                     # timeout for bbox-to-XYZ service calls (s)
 YOLO_SIGNED_AR_ROTATION_DEG = '15'              # rotation angle for signed aspect-ratio estimation
