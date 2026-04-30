@@ -43,11 +43,11 @@ STEP_SIZE = GA_STEP_SIZE
 NUM_GENERATIONS = GA_NUM_GENERATIONS
 INITIAL_GENE_LENGTH_RANGE = GA_INITIAL_GENE_LENGTH_RANGE
 
-DISTANCE_WEIGHT = GA_DISTANCE_WEIGHT
+DISTANCE_WEIGHT = GA_DISTANCE_WEIGHT # 5.25
 POSE_WEIGHT = GA_POSE_WEIGHT
 NON_ORTHO_APPROACH_WEIGHT = GA_NON_ORTHO_APPROACH_WEIGHT
-LENGTH_PENALTY_WEIGHT = GA_LENGTH_PENALTY_WEIGHT
-DISTANCE_SCALE_MM = GA_DISTANCE_SCALE_MM
+LENGTH_PENALTY_WEIGHT = GA_LENGTH_PENALTY_WEIGHT # 0.3
+DISTANCE_SCALE_MM = GA_DISTANCE_SCALE_MM # This is 500mm
 Z_GLOBAL_OFFSET_MM = GA_Z_GLOBAL_OFFSET_MM
 
 CONVERGENCE_CHECK = GA_CONVERGENCE_CHECK
@@ -55,7 +55,7 @@ CONVERGENCE_TOLERANCE = GA_CONVERGENCE_TOLERANCE
 
 FITNESS_PLOT_ENABLED = False
 FITNESS_PLOT_FILENAME = "ga_fitness_history.png"
-FITNESS_PLOT_DPI = 300
+FITNESS_PLOT_DPI = 300 # Resolution for saved plot
 
 # ----------------------------------------------------------------#
 # IF YOU MODIFIED THE GA CODE, PASTE YOUR CODE BELOW THIS LINE AND IT WILL USE THE CONSTANTS DEFINED IN CONSTANTS.PY 
@@ -218,7 +218,9 @@ class GeneAlgo:
         # CHANGE THIS REWARD TO A REWARD FOR BEING CLOSE TO THE TARGET
         # min_distance is the closest distance the chromosome got to the target during its simulation
 
+        
         normalized_closeness = max(0.0, (DISTANCE_SCALE_MM - min_distance) / DISTANCE_SCALE_MM)
+        # normalized_closeness = (DISTANCE_WEIGHT * (DISTANCE_SCALE_MM - min_distance) / DISTANCE_SCALE_MM)**2
         distance_reward = normalized_closeness * DISTANCE_WEIGHT
 
 
@@ -232,7 +234,7 @@ class GeneAlgo:
         ##############################   POSE REWARD   ##################################
         # Pose reward depends only on the final gene state.
         pose_score = self._pose_score(best_state) if best_state is not None else 0.0
-        pose_reward = POSE_WEIGHT * pose_score
+        pose_reward = (POSE_WEIGHT * pose_score) ** 2
 
         # Penalize non-orthogonal approach over the full path.
         non_ortho_approach_penalty = NON_ORTHO_APPROACH_WEIGHT * float(avg_non_ortho_pose)

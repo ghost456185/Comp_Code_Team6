@@ -224,7 +224,7 @@ GA_POPULATION_SIZE = 150                        # chromosomes per generation
 GA_NUM_GENERATIONS = 100                        # default evolution epochs
 GA_ELITISM_PERCENT = 0.20                       # fraction of best chromosomes preserved
 GA_RANDOM_BACKFILL_PERCENT = 0.15               # fraction of new random individuals per generation
-GA_MUTATION_RATE = 0.05                         # per-gene mutation probability
+GA_MUTATION_RATE = 0.10                         # per-gene mutation probability
 GA_SELECTION_METHOD = 'tournament'              # parent selection: "tournament" or "roulette"
 GA_TOURNAMENT_K = 3                             # tournament selection contestants
 GA_STEP_SIZE = 2                                # joint-space step per action
@@ -232,10 +232,10 @@ GA_INITIAL_GENE_LENGTH_RANGE = (10, 60)         # chromosome length bounds
 GA_TARGET_DISTANCE_THRESHOLD_MM = 1.0           # distance at which chromosome is trimmed
 
 # Fitness weights
-GA_DISTANCE_WEIGHT = 90.0                       # reward for minimizing distance to goal
-GA_POSE_WEIGHT = 20.0                           # reward for end-effector orthogonality
-GA_NON_ORTHO_APPROACH_WEIGHT = 50.0             # penalty for non-orthogonal trajectory average
-GA_LENGTH_PENALTY_WEIGHT = 0.5                  # penalty for longer chromosomes
+GA_DISTANCE_WEIGHT = 5.25                       # reward for minimizing distance to goal
+GA_POSE_WEIGHT = 5.0                            # reward for end-effector orthogonality
+GA_NON_ORTHO_APPROACH_WEIGHT = 5.0             # penalty for non-orthogonal trajectory average
+GA_LENGTH_PENALTY_WEIGHT = 0.3                  # penalty for longer chromosomes
 GA_DISTANCE_SCALE_MM = 500.0                    # normalizing scale for distance fitness
 
 # Convergence
