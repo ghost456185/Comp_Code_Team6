@@ -1,8 +1,8 @@
 {
-  "name": "wskr-panels",
-  "displayName": "WSKR Panels",
-  "description": "Client-rendered panels for the WSKR web dashboard (ArUco camera overlay + top-down whisker fan).",
-  "publisher": "wskr",
+  "name": "grasp-panel-add-on",
+  "displayName": "grasp panel add-on",
+  "description": "Foxglove extension that adds a dedicated grasp control panel with grasp/cancel service buttons.",
+  "publisher": "project6",
   "homepage": "https://github.com/UI-HandBuiltRobot/Project5_Solution_Vision_Navigation",
   "version": "0.1.0",
   "license": "Apache-2.0",

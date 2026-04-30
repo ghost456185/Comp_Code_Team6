@@ -152,7 +152,7 @@ the same subnet as the Jetson, so WebSocket connections work directly.
 ### 2.1 Download Foxglove Studio
 
 Go to <https://foxglove.dev/download> and download the Linux `.deb`
-file. Save it somewhere accessible, e.g. `~/Downloads/`.
+file for x64. Save it somewhere accessible, e.g. `~/Downloads/`.
 
 ### 2.2 Extract the .deb without installing
 

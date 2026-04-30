@@ -181,6 +181,31 @@ pip install \
     ultralytics-thop
 ```
 
+### Install `lap` (ByteTrack tracker dependency)
+
+`lap` powers the linear-assignment step inside ultralytics' ByteTrack
+tracker. PyPI has no `aarch64` wheel for it, so pip compiles it from
+source — and the compile step needs the NumPy headers. If you let pip
+install `lap` inside its default isolated build environment, the build
+won't see the NumPy you just pinned and you'll get:
+
+```
+fatal error: numpy/ndarrayobject.h: No such file or directory
+```
+
+The fix is to disable build isolation so the build sees the system
+NumPy (which by this point is the pinned 1.26.x):
+
+```bash
+pip install --no-build-isolation 'lap>=0.5'
+```
+
+Verify:
+
+```bash
+python3 -c "import lap; print('lap', lap.__version__)"
+```
+
 ### Export-time dependencies
 
 The TensorRT engine export (Step 5) converts `.pt → .onnx → .engine`.
@@ -390,6 +415,7 @@ TensorRT engine.
 | `ImportError: libcudss.so.0: cannot open shared object file` | You installed `torch >= 2.10`. JetPack 6 doesn't ship cuDSS. `pip uninstall -y torch torchvision` and reinstall with the `torch==2.8.0 torchvision==0.23.0` pins from Step 2. |
 | `AttributeError: module 'cv2' has no attribute 'aruco'` | `opencv-python` got installed alongside `opencv-contrib-python`. Run `pip uninstall -y opencv-python` then `pip install --force-reinstall 'opencv-contrib-python==4.10.*'`. |
 | `ImportError: numpy.core.multiarray failed to import` | `numpy` was upgraded past 1.26. Run `pip install --force-reinstall 'numpy==1.26.*'`. |
+| `fatal error: numpy/ndarrayobject.h: No such file or directory` while building `lap` | pip's isolated build env can't see your installed NumPy. Run `pip install --no-build-isolation 'lap>=0.5'`. |
 | Ultralytics auto-install fails during export: `No matching distribution found for onnxruntime-gpu` | `onnxruntime-gpu` has no `aarch64` wheel on PyPI. Install manually per Step 3: `pip install --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu126 onnx onnxslim onnxruntime-gpu` |
 | Engine export hangs or OOMs | Close other GPU/CPU workloads. The builder can use >3 GB on Orin Nano. Run `sudo jetson_clocks` to pin max clocks. |
 | `NvMapMemAllocInternalTagged: ... error 12` spam during TRT export | **Not fatal.** NVMAP can't allocate the requested buffer size; TRT retries smaller and continues. Usually caused by a concurrent build or other memory-heavy workload. |
@@ -414,10 +440,11 @@ pip install -r Project5_WS/requirements.txt
 pip install --index-url https://pypi.jetson-ai-lab.io/jp6/cu126 \
     torch==2.8.0 torchvision==0.23.0
 
-# Step 3: ultralytics (no-deps) + manual deps + export-time deps
+# Step 3: ultralytics (no-deps) + manual deps + lap + export-time deps
 pip install --no-deps ultralytics
 pip install matplotlib pillow tqdm psutil py-cpuinfo pandas seaborn \
     requests ultralytics-thop
+pip install --no-build-isolation 'lap>=0.5'   # avoids numpy/ndarrayobject.h error
 pip install --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu126 \
     onnx onnxslim onnxruntime-gpu
 

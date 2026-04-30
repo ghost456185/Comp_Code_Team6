@@ -153,14 +153,23 @@ class ApproachServiceBridge(Node):
             StartGrasp, 'xarm_grasp_start', self._on_grasp_start,
             callback_group=cb,
         )
+        # Aliases used by the dedicated Foxglove grasp panel.
+        self.create_service(
+            StartGrasp, 'grasp', self._on_grasp_start,
+            callback_group=cb,
+        )
         self.create_service(
             Trigger, 'xarm_grasp_cancel', self._on_grasp_cancel,
+            callback_group=cb,
+        )
+        self.create_service(
+            Trigger, 'cancel', self._on_grasp_cancel,
             callback_group=cb,
         )
 
         self.get_logger().info(
             'Foxglove action bridge up: approach_object / search_behavior / xarm_grasp '
-            '(each with _start + _cancel services).'
+            '(with _start + _cancel services) plus grasp/cancel aliases for xarm_grasp.'
         )
 
     # ---------------------------------------------------------------- approach

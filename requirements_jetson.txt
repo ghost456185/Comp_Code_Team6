@@ -17,6 +17,12 @@
 # torchvision==0.23.0    # (same command as above)
 # ultralytics>=8.4,<9.0  # pip install --no-deps ultralytics
 #                        #   (plain 'pip install ultralytics' pulls CPU-only PyTorch from PyPI)
+# lap>=0.5               # ByteTrack dependency. No aarch64 wheels — must compile from
+#                        # source, and pip's isolated build env can't see numpy unless
+#                        # numpy is already installed AND build isolation is disabled.
+#                        # If you see "fatal error: numpy/ndarrayobject.h: No such file":
+#                        #   pip install 'numpy>=1.26,<2.0'
+#                        #   pip install --no-build-isolation 'lap>=0.5'
 # PyGObject (gi)         # apt: python3-gi (GStreamer Python bindings)
 # python3-tk             # apt: python3-tk (Tkinter for GUIs)
 
@@ -35,7 +41,6 @@ matplotlib>=3.5               # optional (GA plotting only); needs numpy <2.0
 # reproducibility, but loosening is safe.
 
 hidapi==0.15.0            # USB HID for whisker sensor board
-lap>=0.5                  # linear assignment (ultralytics dependency)
 pyserial>=3.5             # Arduino serial bridge
 PyYAML>=5.4               # YAML config parsing
 xarm==0.0.4               # UFactory xArm SDK — no newer version available
