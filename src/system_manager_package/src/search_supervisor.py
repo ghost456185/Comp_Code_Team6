@@ -265,23 +265,154 @@ class SearchBehavior(Node):
             f'id={target_id}, timeout={timeout_sec}s'
         )
 
-        # TODO: implement your search logic here.
-        #
-        # Suggested approach:
-        #   1. Enable the autopilot: self._enable_autopilot(True)
-        #   2. Loop until timeout:
-        #      a. Choose a heading (use whiskers to avoid obstacles)
-        #      b. Publish it: self._publish_heading(heading_deg)
-        #      c. Check sensor data for your target
-        #      d. If found, populate result and call goal_handle.succeed()
-        #      e. Sleep briefly: time.sleep(0.05)
-        #   3. If timeout, call goal_handle.abort()
-        #   4. Always stop the robot in a finally block
+        # Implementation parameters
+        self.conf_threshold = getattr(self, 'conf_threshold', 0.7)
+        whisker_obstacle_thresh = getattr(self, 'whisker_obstacle_thresh', 200.0)
+        heading_step_deg = getattr(self, 'heading_step_deg', 20.0)
+        poll_sleep = getattr(self, 'poll_sleep', 0.05)
 
-        result = WskrSearch.Result()
-        result.success = False
-        goal_handle.abort()
-        return result
+        start_time = time.time()
+        feedback = WskrSearch.Feedback()
+        detections_sampled = 0
+
+        # enable autopilot
+        self._enable_autopilot(True)
+
+        # helper detection checks
+        def _check_for_toy():
+            nonlocal detections_sampled
+            with self.lock:
+                det = self.latest_detections
+            if det is None:
+                return None
+            detections_sampled += 1
+            # confidences may be empty — iterate
+            for conf in getattr(det, 'confidence', []) or []:
+                if conf >= self.conf_threshold:
+                    return det
+            return None
+
+        def _check_for_box(tid: int):
+            with self.lock:
+                markers = self.latest_aruco_markers
+            if markers is None or not getattr(markers, 'data', None):
+                return None
+            data = markers.data
+            # markers use 9 entries per marker: id,x0,y0,...x3,y3
+            if len(data) < 9:
+                return None
+            for i in range(0, len(data), 9):
+                try:
+                    marker_id = int(data[i])
+                except Exception:
+                    continue
+                if marker_id == tid:
+                    # create a minimal ImgDetectionData to return
+                    det = ImgDetectionData()
+                    det.image_width = 0
+                    det.image_height = 0
+                    det.inference_time = 0.0
+                    det.detection_ids = [str(marker_id)]
+                    det.x = [float(data[i+1])]
+                    det.y = [float(data[i+2])]
+                    det.width = [0.0]
+                    det.height = [0.0]
+                    det.distance = [0.0]
+                    det.location = []
+                    det.yaw = [0.0]
+                    det.class_name = ["aruco_box"]
+                    det.confidence = [1.0]
+                    det.aspect_ratio = [0.0]
+                    return det
+            return None
+
+        # wander variables (triangle wave)
+        wander_amplitude = 45.0
+        wander_period = 8.0
+
+        try:
+            while time.time() - start_time < timeout_sec:
+                # check cancel
+                if goal_handle.is_cancel_requested:
+                    goal_handle.canceled()
+                    result = WskrSearch.Result()
+                    result.success = False
+                    return result
+
+                elapsed = time.time() - start_time
+
+                # compute heading using whiskers if available
+                heading = 0.0
+                with self.lock:
+                    whiskers = None if self.latest_whiskers is None else np.copy(self.latest_whiskers)
+                if whiskers is not None and whiskers.size >= 11:
+                    left = float(np.mean(whiskers[:5]))
+                    right = float(np.mean(whiskers[6:11]))
+                    if left < whisker_obstacle_thresh:
+                        heading = -heading_step_deg
+                        phase = 'avoiding_left'
+                    elif right < whisker_obstacle_thresh:
+                        heading = heading_step_deg
+                        phase = 'avoiding_right'
+                    else:
+                        # forward wander small oscillation
+                        phase = 'wandering'
+                        # triangle wave between -amplitude..+amplitude
+                        t = (elapsed % wander_period) / wander_period
+                        if t < 0.5:
+                            heading = -wander_amplitude + (t / 0.5) * (2 * wander_amplitude)
+                        else:
+                            heading = wander_amplitude - ((t - 0.5) / 0.5) * (2 * wander_amplitude)
+                else:
+                    # no whiskers — deterministic wander
+                    phase = 'wandering'
+                    t = (elapsed % wander_period) / wander_period
+                    if t < 0.5:
+                        heading = -wander_amplitude + (t / 0.5) * (2 * wander_amplitude)
+                    else:
+                        heading = wander_amplitude - ((t - 0.5) / 0.5) * (2 * wander_amplitude)
+
+                # publish heading
+                self._publish_heading(heading)
+
+                # publish feedback occasionally
+                feedback.elapsed_sec = float(elapsed)
+                feedback.current_phase = phase
+                feedback.detections_sampled = int(detections_sampled)
+                try:
+                    goal_handle.publish_feedback(feedback)
+                except Exception:
+                    pass
+
+                # check target
+                if target_type == self.TARGET_TOY:
+                    found = _check_for_toy()
+                    if found is not None:
+                        result = WskrSearch.Result()
+                        result.success = True
+                        result.detected_object = found
+                        goal_handle.succeed()
+                        return result
+                else:
+                    found = _check_for_box(target_id)
+                    if found is not None:
+                        result = WskrSearch.Result()
+                        result.success = True
+                        result.detected_object = found
+                        goal_handle.succeed()
+                        return result
+
+                time.sleep(poll_sleep)
+
+            # timeout
+            self.get_logger().info('Search timed out')
+            goal_handle.abort()
+            result = WskrSearch.Result()
+            result.success = False
+            return result
+        finally:
+            # ensure robot stops
+            self._stop_robot()
 
 
 def main(args=None) -> None:
