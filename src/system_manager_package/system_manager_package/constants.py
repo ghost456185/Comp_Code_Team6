@@ -88,7 +88,7 @@ DR_PUBLISH_RATE_HZ = 10.0                        # fused heading publish rate (H
 # ║  WSKR — AUTOPILOT  (MLP-based reactive controller)            ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-AUTOPILOT_MODEL_FILENAME = '70%_Navigation.json'  # trained MLP policy filename (in share/wskr/models/)
+AUTOPILOT_MODEL_FILENAME = 'your_MLP_model_here.json'  # trained MLP policy filename (in share/wskr/models/)
 AUTOPILOT_WHISKER_COUNT = 11                    # number of whisker rays in the fan
 AUTOPILOT_STATE_DIM = 23                        # MLP input: 11 whiskers + 11 target whiskers + 1 heading
 AUTOPILOT_CONTROL_RATE_HZ = 10.0                 # inference/publish frequency (Hz); matches CAMERA_PUBLISH_HZ
@@ -139,9 +139,9 @@ YOLO_SIGNED_AR_ROTATION_DEG = '15'              # rotation angle for signed aspe
 # ╚══════════════════════════════════════════════════════════════════╝
 
 SELECTION_CLASS_PRIORITIES = [                  # class ranking: lower index = higher priority
-    'rectangular_prism',
-    'cube',
-    'triangular_prism',
+    'rectangular_prism', # +15 Points per shape
+    'triangular_prism', # +10 Points per shape
+    'cube', # +5 Points per shape
 ]
 SELECTION_MIN_CONFIDENCE = 0.5                  # discard detections below this confidence
 
