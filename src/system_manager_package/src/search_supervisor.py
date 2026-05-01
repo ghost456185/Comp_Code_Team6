@@ -129,7 +129,7 @@ from robot_interfaces.msg import ImgDetectionData
 
 
 IMAGE_QOS = QoSProfile(
-    reliability=ReliabilityPolicy.BEST_EFFORT,
+    reliability=ReliabilityPolicy.RELIABLE,
     history=HistoryPolicy.KEEP_LAST,
     depth=1,
 )
