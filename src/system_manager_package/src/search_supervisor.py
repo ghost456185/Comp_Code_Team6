@@ -118,7 +118,7 @@ import numpy as np
 import rclpy
 from rclpy.action import ActionServer, CancelResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, QoSDurabilityPolicy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import Image
@@ -129,7 +129,7 @@ from robot_interfaces.msg import ImgDetectionData
 
 
 IMAGE_QOS = QoSProfile(
-    reliability=ReliabilityPolicy.RELIABLE,
+    reliability=ReliabilityPolicy.BEST_EFFORT,
     history=HistoryPolicy.KEEP_LAST,
     depth=1,
 )
@@ -175,8 +175,14 @@ class SearchBehavior(Node):
         self.heading_pub = self.create_publisher(
             Float32, 'WSKR/heading_to_target', 10,
         )
+        autopilot_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+        )
         self.autopilot_enable_pub = self.create_publisher(
-            Bool, 'WSKR/autopilot/enable', 10,
+            Bool, 'WSKR/autopilot/enable', autopilot_qos,
         )
 
         # ── Action server ───────────────────────────────────────────
