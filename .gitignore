@@ -45,3 +45,14 @@ htmlcov/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Node / npm build artifacts (foxglove extension development)
+src/utilities/foxglove_extensions/**/node_modules/
+src/utilities/foxglove_extensions/**/*.foxe
+src/utilities/foxglove_extensions/**/dist/
+src/utilities/foxglove_extensions/**/out/
+src/utilities/foxglove_extensions/**/.cache/
+src/utilities/foxglove_extensions/**/.parcel-cache/
+src/utilities/foxglove_extensions/**/*.tgz
+src/utilities/foxglove_extensions/**/*.log
+src/utilities/foxglove_extensions/**/package-lock.json
