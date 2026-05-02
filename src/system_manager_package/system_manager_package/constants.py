@@ -37,6 +37,8 @@ SERIAL_PORT = '/dev/ttyACM1'                    # USB serial port to Arduino
 SERIAL_BAUD = 115200                            # baud rate
 SERIAL_CMD_RATE_HZ = 10.0                        # rate of V commands to Arduino (Hz); matches Arduino LOOP_PERIOD_MS=100
 SERIAL_CMD_TIMEOUT_S = 0.5                      # stale cmd_vel age before sending zeros (s)
+SERIAL_SPEED_SCALE = 2.0                        # motor speed scaling factor
+SERIAL_TURN_SCALE = 2.0                         # motor turn scaling factor
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  WSKR — FLOOR DETECTION  (wskr_floor_node)                    ║

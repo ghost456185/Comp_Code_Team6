@@ -52,6 +52,8 @@ from system_manager_package.constants import (
     SERIAL_CMD_RATE_HZ,
     SERIAL_CMD_TIMEOUT_S,
     SERIAL_PORT,
+    SERIAL_SPEED_SCALE,
+    SERIAL_TURN_SCALE,
 )
 
 
@@ -149,9 +151,9 @@ class MecanumSerialBridge(Node):
             if self.stop_on_timeout:
                 self._send_line('V,0,0,0')
             return
-        vx_cm = twist.linear.x * 100.0
-        vy_cm = twist.linear.y * 100.0
-        omega_deg = twist.angular.z * 180.0 / math.pi
+        vx_cm = twist.linear.x * 100.0 * SERIAL_SPEED_SCALE
+        vy_cm = twist.linear.y * 100.0 * SERIAL_SPEED_SCALE
+        omega_deg = (twist.angular.z * 180.0 / math.pi) * SERIAL_TURN_SCALE
         self._send_line(f'V,{vx_cm:.4f},{vy_cm:.4f},{omega_deg:.4f}')
 
     def _send_line(self, line: str) -> None:
