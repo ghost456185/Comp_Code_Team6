@@ -93,9 +93,9 @@ AUTOPILOT_WHISKER_COUNT = 11                    # number of whisker rays in the 
 AUTOPILOT_STATE_DIM = 23                        # MLP input: 11 whiskers + 11 target whiskers + 1 heading
 AUTOPILOT_CONTROL_RATE_HZ = 10.0                 # inference/publish frequency (Hz); matches CAMERA_PUBLISH_HZ
 AUTOPILOT_INPUT_FRESHNESS_S = 0.5               # stale input timeout before publishing zeros (s)
-AUTOPILOT_MAX_LINEAR_MPS = 0.40                 # max forward/strafe speed (m/s)
+AUTOPILOT_MAX_LINEAR_MPS = 1.0                 # max forward/strafe speed (m/s)
 AUTOPILOT_MAX_ANGULAR_RPS = math.radians(40.0)  # max rotation rate (rad/s, = 40 deg/s)
-AUTOPILOT_SPEED_SCALE = 1.0                     # global output scaling [0,1] applied to all motor commands
+AUTOPILOT_SPEED_SCALE = 10.0                     # global output scaling [0,1] applied to all motor commands
 AUTOPILOT_PROXIMITY_MAX_MM = 500.0              # distance where proximity attenuation = 1.0 (full speed)
 AUTOPILOT_PROXIMITY_MIN_MM = 100.0              # distance where proximity attenuation bottoms out
 AUTOPILOT_PROXIMITY_SPEED_MAX = 10.0             # drive speed scale at max distance
