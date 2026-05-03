@@ -10,9 +10,12 @@
 // ========================================================================
 // CONFIGURATION
 // ========================================================================
-// Encoder pins (Channel A=interrupt, Channel B=sampled)
-const int ENC_FR_B = 11,  ENC_FL_B = 10,  ENC_RR_B = 8,  ENC_RL_B = 9;
-const int ENC_FR_A = 6,  ENC_FL_A = 5,  ENC_RR_A = 3,   ENC_RL_A = 4;
+// Encoder pins (Channel A=interrupt, Channel B=sampled) {Correct as of May 3rd, 2026}
+const int ENC_FR_B = 5, ENC_FR_A = 10;
+const int ENC_FL_B = 11,  ENC_FL_A = 6;
+const int ENC_RR_B = 3,  ENC_RR_A = 8;
+const int ENC_RL_B = 9,  ENC_RL_A = 4;
+
 
 // Encoder specs
 const int ENCODER_PPR = 8;
