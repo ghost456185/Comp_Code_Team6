@@ -29,7 +29,7 @@ const float WHEELBASE_Y = 11.7;
 const int MOTOR_FL_PORT = 2, MOTOR_FR_PORT = 1, MOTOR_RL_PORT = 4, MOTOR_RR_PORT = 3;
 const int MOTOR_FL_DIR = -1, MOTOR_FR_DIR = 1, MOTOR_RL_DIR = -1, MOTOR_RR_DIR = 1;
 
-// PI controller
+// PI controller (Change Values as Needed)
 const float KP = 10.0, KI = 5;
 const unsigned long LOOP_PERIOD_MS = 100;  // 10Hz
 
