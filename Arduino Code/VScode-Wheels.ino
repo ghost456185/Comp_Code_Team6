@@ -31,7 +31,7 @@ double FFT = 2; // Fudge-Factor for Turning
 
 double FFV = 1; // Fudge-Factor for Velocity Mode
 
-double Kp = 10, Ki = 10, Kd = 0.01;
+double Kp = 60, Ki = 250, Kd = 0.575;
 
 
 const int ENCA[] = {3, 4, 5, 6};
