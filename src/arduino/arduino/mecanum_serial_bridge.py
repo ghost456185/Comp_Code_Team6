@@ -47,7 +47,7 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError('pyserial is required (apt: python3-serial, pip: pyserial).') from exc
 
-from system_manager_package.system_manager_package.constants import (
+from system_manager_package.constants import (
     SERIAL_BAUD,
     SERIAL_CMD_RATE_HZ,
     SERIAL_CMD_TIMEOUT_S,
