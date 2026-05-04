@@ -44,6 +44,7 @@ from system_manager_package.constants import (
     AUTOPILOT_SPEED_SCALE,
     AUTOPILOT_STATE_DIM,
     AUTOPILOT_WHISKER_COUNT,
+    HEADING_TRIM_DEG,
 )
 
 DEFAULT_MODEL_FILENAME = AUTOPILOT_MODEL_FILENAME
@@ -331,7 +332,7 @@ class WskrAutopilot(Node):
         self.cache.put("target_whiskers_mm", np.asarray(msg.data, dtype=np.float64))
 
     def _on_heading(self, msg: Float32) -> None:
-        self.cache.put("heading_deg", float(msg.data))
+        self.cache.put("heading_deg", float(msg.data) + HEADING_TRIM_DEG)
 
     def _on_tracking_mode(self, msg: String) -> None:
         self.cache.put("tracking_mode", str(msg.data))
