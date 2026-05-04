@@ -33,7 +33,7 @@ const int MOTOR_FL_PORT = 4, MOTOR_FR_PORT = 3, MOTOR_RL_PORT = 2, MOTOR_RR_PORT
 const int MOTOR_FL_DIR = 1, MOTOR_FR_DIR = 1, MOTOR_RL_DIR = 1, MOTOR_RR_DIR = 1;
 
 // PI controller (Change Values as Needed)
-const float KP = 10.0, KI = 5;
+const float KP = 10.0, KI = 82.0;
 const unsigned long LOOP_PERIOD_MS = 100;  // 10Hz
 
 // Queue and tolerances
