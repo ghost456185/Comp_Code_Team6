@@ -143,6 +143,11 @@ class WskrAutopilot(Node):
             AUTOPILOT_PROXIMITY_SPEED_MIN,
             ParameterDescriptor(description="Drive speed scale floor at proximity_min_mm and below."),
         )
+        self.declare_parameter(
+            "heading_trim_deg",
+            HEADING_TRIM_DEG,
+            ParameterDescriptor(description="Heading trim (deg) added to heading_to_target."),
+        )
 
         self._model_lock = threading.Lock()
         self._loaded_model_path: str = ""
@@ -152,6 +157,7 @@ class WskrAutopilot(Node):
         self.input_freshness_s = float(self.get_parameter("input_freshness_s").value)
         self.max_linear_mps = float(self.get_parameter("max_linear_mps").value)
         self.max_angular_rps = float(self.get_parameter("max_angular_rps").value)
+        self.heading_trim_deg = float(self.get_parameter("heading_trim_deg").value)
         self.publish_zero_when_disabled = bool(self.get_parameter("publish_zero_when_disabled").value)
         self.speed_scale = self._clamp01(float(self.get_parameter("speed_scale").value))
         self.proximity_max_mm   = max(0.0, float(self.get_parameter("proximity_max_mm").value))
@@ -192,7 +198,7 @@ class WskrAutopilot(Node):
         self.get_logger().info(
             f"wskr_autopilot up: mode={self.mode}, memory_steps={self.memory_steps}, "
             f"input_dim={self.input_dim}, output_dim={self.output_dim}, "
-            f"control_rate={self.control_rate_hz}Hz"
+            f"control_rate={self.control_rate_hz}Hz, heading_trim_deg={self.heading_trim_deg}"
         )
 
     # ------------------------------------------------------------------ model
@@ -332,7 +338,7 @@ class WskrAutopilot(Node):
         self.cache.put("target_whiskers_mm", np.asarray(msg.data, dtype=np.float64))
 
     def _on_heading(self, msg: Float32) -> None:
-        self.cache.put("heading_deg", float(msg.data) + HEADING_TRIM_DEG)
+        self.cache.put("heading_deg", float(msg.data) + self.heading_trim_deg)
 
     def _on_tracking_mode(self, msg: String) -> None:
         self.cache.put("tracking_mode", str(msg.data))
