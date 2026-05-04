@@ -55,11 +55,7 @@ IMAGE_QOS = QoSProfile(
 )
 
 DEFAULT_PIPELINE = (
-    f'v4l2src device={CAMERA_DEVICE} ! '
-    f' extra-controls="s,brightness={CAMERA_BRIGHTNESS}'
-    f' contrast={CAMERA_CONTRAST}' 
-    f' saturation={CAMERA_SATURATION}' 
-    f' gamma={CAMERA_GAMMA}" ! '
+    f'v4l2src device={CAMERA_DEVICE} extra-controls="s,brightness={CAMERA_BRIGHTNESS},contrast={CAMERA_CONTRAST},saturation={CAMERA_SATURATION},gamma={CAMERA_GAMMA}" ! '
     f'image/jpeg, width={CAMERA_WIDTH}, height={CAMERA_HEIGHT}, framerate={CAMERA_FPS}/1 ! '
     'appsink name=sink max-buffers=1 drop=true sync=false'
 )
