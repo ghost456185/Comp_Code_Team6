@@ -41,6 +41,10 @@ from system_manager_package.constants import (
     CAMERA_HEIGHT,
     CAMERA_PUBLISH_HZ,
     CAMERA_WIDTH,
+    CAMERA_BRIGHTNESS,
+    CAMERA_CONTRAST,
+    CAMERA_SATURATION,
+    CAMERA_GAMMA,
 )
 
 
@@ -52,6 +56,10 @@ IMAGE_QOS = QoSProfile(
 
 DEFAULT_PIPELINE = (
     f'v4l2src device={CAMERA_DEVICE} ! '
+    f' extra-controls="s,brightness={CAMERA_BRIGHTNESS}'
+    f' contrast={CAMERA_CONTRAST}' 
+    f' saturation={CAMERA_SATURATION}' 
+    f' gamma={CAMERA_GAMMA}" ! '
     f'image/jpeg, width={CAMERA_WIDTH}, height={CAMERA_HEIGHT}, framerate={CAMERA_FPS}/1 ! '
     'appsink name=sink max-buffers=1 drop=true sync=false'
 )

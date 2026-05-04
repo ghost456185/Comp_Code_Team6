@@ -28,6 +28,10 @@ CAMERA_HEIGHT = 1080                            # capture resolution height (px)
 CAMERA_FPS = 30                                 # capture framerate
 CAMERA_PUBLISH_HZ = 10.0                        # throttled publish rate to DDS (Hz)
 CAMERA_FRAME_ID = 'camera_frame'                # TF frame stamped on images
+CAMERA_BRIGHTNESS = -25
+CAMERA_CONTRAST = 32
+CAMERA_SATURATION = 91
+CAMERA_GAMMA = 150
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  ARDUINO / SERIAL BRIDGE                                       ║
