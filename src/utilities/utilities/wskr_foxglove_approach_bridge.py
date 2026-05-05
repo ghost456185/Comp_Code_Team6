@@ -17,6 +17,9 @@ dashboard can call in lieu of submitting an action goal directly:
     /WSKR/approach_object_cancel   std_srvs/srv/Trigger
         cancels the currently-active approach goal.
 
+    /approach_then_grasp           robot_interfaces/srv/ApproachObject
+        runs approach first, waits for completion, then starts grasp.
+
     /WSKR/search_behavior_start    robot_interfaces/srv/StartSearch
         target_type (0=TOY, 1=BOX), target_id, timeout_sec.
 
@@ -65,6 +68,7 @@ from robot_interfaces.srv import (
 
 ACTION_SERVER_WAIT_TIMEOUT_S = 2.0
 GOAL_ACCEPTANCE_TIMEOUT_S = 5.0
+ACTION_RESULT_TIMEOUT_S = 180.0
 
 
 def _wait_for_future(future, timeout_s: float) -> None:
@@ -87,6 +91,7 @@ class _ActionBridge:
         self._client = ActionClient(node, action_type, action_name, callback_group=cb_group)
         self._lock = threading.Lock()
         self._handle = None
+        self._result_future = None
 
     def wait_for_server(self) -> bool:
         return self._client.wait_for_server(timeout_sec=ACTION_SERVER_WAIT_TIMEOUT_S)
@@ -104,12 +109,26 @@ class _ActionBridge:
             return 'Action server rejected the goal.'
         with self._lock:
             self._handle = handle
-        handle.get_result_async().add_done_callback(self._on_finished)
+            self._result_future = handle.get_result_async()
+            self._result_future.add_done_callback(self._on_finished)
         return None
+
+    def wait_for_result(self, timeout_s: float = ACTION_RESULT_TIMEOUT_S):
+        with self._lock:
+            result_future = self._result_future
+        if result_future is None:
+            return False, 'No active goal result future available.'
+
+        _wait_for_future(result_future, timeout_s)
+        if not result_future.done():
+            return False, 'Timed out waiting for the action result.'
+
+        return True, result_future.result()
 
     def _on_finished(self, _future) -> None:
         with self._lock:
             self._handle = None
+            self._result_future = None
 
     def cancel(self) -> tuple[bool, str]:
         with self._lock:
@@ -135,6 +154,10 @@ class ApproachServiceBridge(Node):
 
         self.create_service(
             ApproachObjectSrv, 'WSKR/approach_object_start', self._on_approach_start,
+            callback_group=cb,
+        )
+        self.create_service(
+            ApproachObjectSrv, 'approach_then_grasp', self._on_approach_then_grasp,
             callback_group=cb,
         )
         self.create_service(
@@ -168,8 +191,9 @@ class ApproachServiceBridge(Node):
         )
 
         self.get_logger().info(
-            'Foxglove action bridge up: approach_object / search_behavior / xarm_grasp '
-            '(with _start + _cancel services) plus grasp/cancel aliases for xarm_grasp.'
+            'Foxglove action bridge up: approach_object / approach_then_grasp / '
+            'search_behavior / xarm_grasp (with _start + _cancel services) plus '
+            'grasp/cancel aliases for xarm_grasp.'
         )
 
     # ---------------------------------------------------------------- approach
@@ -224,6 +248,114 @@ class ApproachServiceBridge(Node):
         response.success = ok
         response.message = msg
         self.get_logger().info(msg)
+        return response
+
+    def _build_approach_goal(self, request: ApproachObjectSrv.Request):
+        goal = ApproachObjectAction.Goal()
+        # TARGET_TOY when the dashboard filled in a selected_obj with a
+        # class name (ImgDetectionData-driven flow); otherwise BOX + ArUco id.
+        sel = request.selected_obj
+        if getattr(sel, 'class_name', None) and len(sel.class_name) > 0 and sel.class_name[0]:
+            goal.target_type = ApproachObjectAction.Goal.TARGET_TOY
+        else:
+            goal.target_type = ApproachObjectAction.Goal.TARGET_BOX
+        goal.object_id = int(request.id)
+        goal.selected_obj = sel if sel is not None else ImgDetectionData()
+        return goal
+
+    def _on_approach_then_grasp(
+        self,
+        request: ApproachObjectSrv.Request,
+        response: ApproachObjectSrv.Response,
+    ) -> ApproachObjectSrv.Response:
+        if not self._approach.wait_for_server():
+            response.movement_success = False
+            response.proximity_success = False
+            response.movement_message = (
+                'Action server WSKR/approach_object is not available. '
+                'Is wskr_approach_action running?'
+            )
+            self.get_logger().warn(response.movement_message)
+            return response
+
+        if not self._grasp.wait_for_server():
+            response.movement_success = False
+            response.proximity_success = False
+            response.movement_message = (
+                'Action server xarm_grasp_action is not available. '
+                'Is grasping_commander_action_node running?'
+            )
+            self.get_logger().warn(response.movement_message)
+            return response
+
+        approach_goal = self._build_approach_goal(request)
+        err = self._approach.send(approach_goal)
+        if err is not None:
+            response.movement_success = False
+            response.proximity_success = False
+            response.movement_message = err
+            self.get_logger().warn(err)
+            return response
+
+        ok, approach_result = self._approach.wait_for_result()
+        if not ok:
+            response.movement_success = False
+            response.proximity_success = False
+            response.movement_message = str(approach_result)
+            self.get_logger().warn(response.movement_message)
+            return response
+
+        approach_result_msg = getattr(approach_result.result, 'movement_message', 'Approach completed.')
+        approach_success = bool(getattr(approach_result.result, 'movement_success', False))
+        proximity_success = bool(getattr(approach_result.result, 'proximity_success', False))
+        if not approach_success:
+            response.movement_success = False
+            response.proximity_success = proximity_success
+            response.movement_message = (
+                f'Approach finished but reported failure; grasp was not started. {approach_result_msg}'
+            )
+            self.get_logger().warn(response.movement_message)
+            return response
+
+        if not proximity_success:
+            response.movement_success = True
+            response.proximity_success = False
+            response.movement_message = (
+                'Approach completed, but proximity_success was false; grasp was not started. '
+                f'{approach_result_msg}'
+            )
+            self.get_logger().warn(response.movement_message)
+            return response
+
+        grasp_goal = XArmAction.Goal()
+        grasp_goal.id = int(request.id)
+        grasp_goal.selected_obj = (
+            request.selected_obj if request.selected_obj is not None else ImgDetectionData()
+        )
+
+        err = self._grasp.send(grasp_goal)
+        if err is not None:
+            response.movement_success = True
+            response.proximity_success = True
+            response.movement_message = f'Approach succeeded, but grasp dispatch failed: {err}'
+            self.get_logger().warn(response.movement_message)
+            return response
+
+        ok, grasp_result = self._grasp.wait_for_result()
+        if not ok:
+            response.movement_success = True
+            response.proximity_success = True
+            response.movement_message = (
+                f'Approach succeeded; grasp timed out waiting for result: {grasp_result}'
+            )
+            self.get_logger().warn(response.movement_message)
+            return response
+
+        grasp_message = getattr(grasp_result.result, 'message', 'Grasp completed.')
+        response.movement_success = bool(getattr(grasp_result.result, 'accepted', True))
+        response.proximity_success = True
+        response.movement_message = f'Approach succeeded, grasp completed: {grasp_message}'
+        self.get_logger().info(response.movement_message)
         return response
 
     # ------------------------------------------------------------------ search
