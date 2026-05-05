@@ -36,6 +36,10 @@ from sensor_msgs.msg import CompressedImage
 
 from system_manager_package.constants import (
     CAMERA_DEVICE,
+    CAMERA_BRIGHTNESS,
+    CAMERA_CONTRAST,
+    CAMERA_SATURATION,
+    CAMERA_GAMMA,
     CAMERA_FPS,
     CAMERA_FRAME_ID,
     CAMERA_HEIGHT,
