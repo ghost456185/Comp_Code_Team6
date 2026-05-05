@@ -162,6 +162,9 @@ class StateManagerNode(Node):
         self._state = RobotState.IDLE
         self._lock = threading.Lock()
         self.selected_object = None
+        self._last_detection = None
+        self._current_goal_handles = {}
+        self._grasp_feedback_success = None
 
         # ── ROS interfaces ──────────────────────────────────────────
         # Publisher: broadcast current state name
@@ -405,8 +408,9 @@ class StateManagerNode(Node):
             self._transition(RobotState.ERROR)
             return
         goal = XArm.Goal()
-        goal.id = 0
+        goal.id = self._extract_selected_object_id(self.selected_object)
         goal.selected_obj = self.selected_object
+        self._grasp_feedback_success = None
         fut = self._grasp_ac.send_goal_async(goal)
         fut.add_done_callback(self._on_grasp_accepted)
 
@@ -417,7 +421,30 @@ class StateManagerNode(Node):
             self._transition(RobotState.ERROR)
             return
         self._current_goal_handles['grasp'] = goal_handle
+        try:
+            goal_handle.add_feedback_callback(self._on_grasp_feedback)
+        except Exception:
+            pass
         goal_handle.get_result_async().add_done_callback(self._on_grasp_result)
+
+    def _on_grasp_feedback(self, feedback_msg):
+        try:
+            feedback = feedback_msg.feedback
+        except Exception:
+            return
+        if getattr(feedback, 'current_stage', '') == 'done':
+            self._grasp_feedback_success = bool(getattr(feedback, 'success', False))
+
+    def _extract_selected_object_id(self, selected_obj):
+        detection_ids = getattr(selected_obj, 'detection_ids', None) or []
+        if detection_ids:
+            try:
+                return int(detection_ids[0])
+            except (TypeError, ValueError):
+                self.get_logger().warning(
+                    f'Invalid detection id {detection_ids[0]!r}; falling back to object id 0'
+                )
+        return 0
 
     def _on_grasp_result(self, future):
         try:
@@ -427,8 +454,9 @@ class StateManagerNode(Node):
             self._transition(RobotState.SEARCH)
             return
         self._current_goal_handles.pop('grasp', None)
-        # feedback contains `success` boolean in feedback; result success in XArm is in feedback.success
-        success = getattr(result, 'success', False)
+        success = self._grasp_feedback_success
+        if success is None:
+            success = bool(getattr(result, 'current_number', 0))
         if success:
             self._grasp_retries = 0
             self.get_logger().info('Grasp succeeded — FIND_BOX')
