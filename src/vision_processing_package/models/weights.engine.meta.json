@@ -1,5 +1,5 @@
 {
-  "exported_at_utc": "2026-04-24T19:36:30.885708+00:00",
+  "exported_at_utc": "2026-05-05T21:12:13.922816+00:00",
   "files": {
     "pt": "/home/me-cas-jetson04/Comp_Code_Team6/src/vision_processing_package/models/weights.pt",
     "engine": "/home/me-cas-jetson04/Comp_Code_Team6/src/vision_processing_package/models/weights.engine"
