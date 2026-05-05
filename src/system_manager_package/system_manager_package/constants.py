@@ -149,6 +149,9 @@ SELECTION_CLASS_PRIORITIES = [                  # class ranking: lower index = h
     'rectangular_prism', # +15 Points per shape
     'triangular_prism', # +10 Points per shape
     'cube', # +5 Points per shape
+    'cylinder', # -5 Points per shape (comment out for friday challenge)
+    'pyramid', # -5 Points per shape (comment out for friday challenge)
+
 ]
 SELECTION_MIN_CONFIDENCE = 0.5                  # discard detections below this confidence
 
@@ -156,16 +159,16 @@ SELECTION_MIN_CONFIDENCE = 0.5                  # discard detections below this 
 # ║  SEARCH BEHAVIOR  (wander + detect action server)              ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-# SEARCH_WANDER_SPEED_MPS = 0.05                  # forward speed during wander (m/s)
-# SEARCH_LOOK_DURATION_SEC = 2.0                  # stationary scanning time per look cycle (s)
-# SEARCH_CONFIDENCE_THRESHOLD = 0.5               # YOLO confidence gate for toy detection
-# SEARCH_POLL_INTERVAL_SEC = 0.05                 # search loop polling period while waiting for new detections (s)
-# SEARCH_FLOOR_OBSTACLE_RATIO = 0.3               # non-floor ratio in bottom-center mask treated as obstacle
-# SEARCH_ARUCO_STALE_TIMEOUT_SEC = 0.5            # max age for cached ArUco marker message before ignoring it (s)
-# SEARCH_HEADING_CHANGE_PERIOD_SEC = 2.0          # interval between heading re-evaluations (s)
-# SEARCH_MAX_HEADING_ANGLE_DEG = 60.0             # max absolute heading during wander (deg)
-# SEARCH_ARUCO_ID = 0                             # default ArUco marker ID for box
-# SEARCH_TIMEOUT_SEC = 60.0                       # default timeout for search goals (s)
+SEARCH_WANDER_SPEED_MPS = 0.05                  # forward speed during wander (m/s)
+SEARCH_LOOK_DURATION_SEC = 2.0                  # stationary scanning time per look cycle (s)
+SEARCH_CONFIDENCE_THRESHOLD = 0.5               # YOLO confidence gate for toy detection
+SEARCH_POLL_INTERVAL_SEC = 0.05                 # search loop polling period while waiting for new detections (s)
+SEARCH_FLOOR_OBSTACLE_RATIO = 0.3               # non-floor ratio in bottom-center mask treated as obstacle
+SEARCH_ARUCO_STALE_TIMEOUT_SEC = 0.5            # max age for cached ArUco marker message before ignoring it (s)
+SEARCH_HEADING_CHANGE_PERIOD_SEC = 2.0          # interval between heading re-evaluations (s)
+SEARCH_MAX_HEADING_ANGLE_DEG = 60.0             # max absolute heading during wander (deg)
+SEARCH_ARUCO_ID = 0                             # default ArUco marker ID for box
+SEARCH_TIMEOUT_SEC = 60.0                       # default timeout for search goals (s)
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  STATE MANAGER  (FSM orchestrator)                             ║
@@ -174,17 +177,17 @@ SELECTION_MIN_CONFIDENCE = 0.5                  # discard detections below this 
 # Delay (seconds) between entering a state and firing its handler.
 # Gives downstream action/service servers time to finish processing the
 # previous goal before the FSM dispatches the next one.
-# SM_DELAY_SEARCH = 0.5                            # short: search server is always listening
-# SM_DELAY_SELECT = 1.0                            # wait for YOLO stream to have a fresh frame
-# SM_DELAY_APPROACH_OBJ = 1.5                      # let autopilot + DR settle after search stops
-# SM_DELAY_GRASP = 1.0                             # let the robot come to a full stop before grasping
-# SM_DELAY_FIND_BOX = 1.0                          # brief pause after stowing object before wandering again
-# SM_DELAY_APPROACH_BOX = 1.5                      # same settle as APPROACH_OBJ
-# SM_DELAY_DROP = 1.0                              # let the robot stop before opening gripper
-# SM_DELAY_WANDER = 0.1                            # near-instant: wander is fire-and-forget exploration
-#
-# SM_MAX_GRASP_RETRIES = 1                         # times to retry a failed grasp before returning to SEARCH
-# SM_BOX_ARUCO_ID = 0                              # ArUco marker ID that identifies the drop box
+SM_DELAY_SEARCH = 0.5                            # short: search server is always listening
+SM_DELAY_SELECT = 1.0                            # wait for YOLO stream to have a fresh frame
+SM_DELAY_APPROACH_OBJ = 1.5                      # let autopilot + DR settle after search stops
+SM_DELAY_GRASP = 1.0                             # let the robot come to a full stop before grasping
+SM_DELAY_FIND_BOX = 1.0                          # brief pause after stowing object before wandering again
+SM_DELAY_APPROACH_BOX = 1.5                      # same settle as APPROACH_OBJ
+SM_DELAY_DROP = 1.0                              # let the robot stop before opening gripper
+SM_DELAY_WANDER = 0.1                            # near-instant: wander is fire-and-forget exploration
+
+SM_MAX_GRASP_RETRIES = 1                         # times to retry a failed grasp before returning to SEARCH
+SM_BOX_ARUCO_ID = 0                              # ArUco marker ID that identifies the drop box
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  XARM — HARDWARE NODE                                         ║

@@ -119,10 +119,24 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.action import ActionClient
 from enum import Enum
 import threading
+import asyncio
 from std_msgs.msg import Empty, String
 from std_srvs.srv import Trigger
 from robot_interfaces.srv import SelectObject
 from robot_interfaces.action import ApproachObject, XArm, WskrSearch
+from system_manager_package.constants import (
+    SM_DELAY_SEARCH,
+    SM_DELAY_SELECT,
+    SM_DELAY_APPROACH_OBJ,
+    SM_DELAY_GRASP,
+    SM_DELAY_FIND_BOX,
+    SM_DELAY_APPROACH_BOX,
+    SM_DELAY_DROP,
+    SM_DELAY_WANDER,
+    SM_MAX_GRASP_RETRIES,
+    SM_BOX_ARUCO_ID,
+    SEARCH_TIMEOUT_SEC,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -166,11 +180,23 @@ class StateManagerNode(Node):
         self._approach_ac = ActionClient(self, ApproachObject, 'WSKR/approach_object')
         self._grasp_ac = ActionClient(self, XArm, 'xarm_grasp_action')
 
+        # Declare parameters from constants
+        self.declare_parameter('sm_delay_search', SM_DELAY_SEARCH)
+        self.declare_parameter('sm_delay_select', SM_DELAY_SELECT)
+        self.declare_parameter('sm_delay_approach_obj', SM_DELAY_APPROACH_OBJ)
+        self.declare_parameter('sm_delay_grasp', SM_DELAY_GRASP)
+        self.declare_parameter('sm_delay_find_box', SM_DELAY_FIND_BOX)
+        self.declare_parameter('sm_delay_approach_box', SM_DELAY_APPROACH_BOX)
+        self.declare_parameter('sm_delay_drop', SM_DELAY_DROP)
+        self.declare_parameter('sm_delay_wander', SM_DELAY_WANDER)
+        self.declare_parameter('sm_max_grasp_retries', SM_MAX_GRASP_RETRIES)
+        self.declare_parameter('sm_box_aruco_id', SM_BOX_ARUCO_ID)
+        self.declare_parameter('search_timeout_sec', SEARCH_TIMEOUT_SEC)
+
         # retry / backoff parameters
         self._approach_retries = 0
         self._grasp_retries = 0
         self._max_approach_retries = 2
-        self._max_grasp_retries = 2
         self._approach_backoff_base = 2.0
         self._approach_backoff_multiplier = 2.0
         self._grasp_backoff_base = 1.5
@@ -195,25 +221,25 @@ class StateManagerNode(Node):
 
             # Dispatch handlers
             if new_state == RobotState.IDLE:
-                self._do_idle()
+                asyncio.create_task(self._do_idle())
             elif new_state == RobotState.SEARCH:
-                self._do_search()
+                asyncio.create_task(self._do_search())
             elif new_state == RobotState.SELECT:
-                self._do_select()
+                asyncio.create_task(self._do_select())
             elif new_state == RobotState.APPROACH_OBJ:
-                self._do_approach_obj()
+                asyncio.create_task(self._do_approach_obj())
             elif new_state == RobotState.GRASP:
-                self._do_grasp()
+                asyncio.create_task(self._do_grasp())
             elif new_state == RobotState.FIND_BOX:
-                self._do_find_box()
+                asyncio.create_task(self._do_find_box())
             elif new_state == RobotState.APPROACH_BOX:
-                self._do_approach_box()
+                asyncio.create_task(self._do_approach_box())
             elif new_state == RobotState.DROP:
-                self._do_drop()
+                asyncio.create_task(self._do_drop())
             elif new_state == RobotState.STOPPED:
-                self._do_stopped()
+                asyncio.create_task(self._do_stopped())
             elif new_state == RobotState.ERROR:
-                self._do_error()
+                asyncio.create_task(self._do_error())
 
     def _on_command(self, msg: String):
         """Handle incoming commands from /robot_command."""
@@ -236,19 +262,22 @@ class StateManagerNode(Node):
     #  State handlers and callbacks
     # ================================================================
 
-    def _do_idle(self):
+    async def _do_idle(self):
         self.get_logger().info('Entering IDLE. Waiting for commands.')
 
     # ---- SEARCH ----
-    def _do_search(self):
+    async def _do_search(self):
         self.get_logger().info('Starting SEARCH for toys')
+        delay = self.get_parameter('sm_delay_search').value
+        await asyncio.sleep(delay)
         if not self._search_ac.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('Search action server not available')
             self._transition(RobotState.ERROR)
             return
         goal = WskrSearch.Goal()
         goal.target_type = WskrSearch.Goal.TARGET_TOY
-        goal.timeout_sec = 30.0
+        goal.aruco_marker_id = self.get_parameter('sm_box_aruco_id').value
+        goal.timeout_sec = self.get_parameter('search_timeout_sec').value
         future = self._search_ac.send_goal_async(goal)
         future.add_done_callback(self._on_search_accepted)
 
@@ -281,8 +310,10 @@ class StateManagerNode(Node):
             self._transition(RobotState.SEARCH)
 
     # ---- SELECT ----
-    def _do_select(self):
+    async def _do_select(self):
         self.get_logger().info('Calling select_object_service')
+        delay = self.get_parameter('sm_delay_select').value
+        await asyncio.sleep(delay)
         if not self._select_cli.wait_for_service(timeout_sec=5.0):
             self.get_logger().error('Select service unavailable')
             self._transition(RobotState.ERROR)
@@ -307,11 +338,13 @@ class StateManagerNode(Node):
             self._transition(RobotState.SEARCH)
 
     # ---- APPROACH_OBJ ----
-    def _do_approach_obj(self):
+    async def _do_approach_obj(self):
         if self.selected_object is None:
             self.get_logger().warning('No selected object to approach — going to SELECT')
             self._transition(RobotState.SELECT)
             return
+        delay = self.get_parameter('sm_delay_approach_obj').value
+        await asyncio.sleep(delay)
         if not self._approach_ac.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('Approach action server not available')
             self._transition(RobotState.ERROR)
@@ -360,11 +393,13 @@ class StateManagerNode(Node):
                 self._transition(RobotState.SEARCH)
 
     # ---- GRASP ----
-    def _do_grasp(self):
+    async def _do_grasp(self):
         if self.selected_object is None:
             self.get_logger().warning('No selected object to grasp — selecting')
             self._transition(RobotState.SELECT)
             return
+        delay = self.get_parameter('sm_delay_grasp').value
+        await asyncio.sleep(delay)
         if not self._grasp_ac.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('Grasp action server not available')
             self._transition(RobotState.ERROR)
@@ -401,7 +436,8 @@ class StateManagerNode(Node):
         else:
             # retry grasp with backoff
             self._grasp_retries += 1
-            if self._grasp_retries <= self._max_grasp_retries:
+            max_retries = self.get_parameter('sm_max_grasp_retries').value
+            if self._grasp_retries <= max_retries:
                 delay = self._grasp_backoff_base * (self._grasp_backoff_multiplier ** (self._grasp_retries - 1))
                 self.get_logger().info(f'Grasp failed — retry #{self._grasp_retries} in {delay:.1f}s')
                 self._schedule_retry(self._do_grasp, delay)
@@ -411,15 +447,18 @@ class StateManagerNode(Node):
                 self._transition(RobotState.SEARCH)
 
     # ---- FIND_BOX ----
-    def _do_find_box(self):
+    async def _do_find_box(self):
         self.get_logger().info('Searching for drop box')
+        delay = self.get_parameter('sm_delay_find_box').value
+        await asyncio.sleep(delay)
         if not self._search_ac.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('Search action server not available')
             self._transition(RobotState.ERROR)
             return
         goal = WskrSearch.Goal()
         goal.target_type = WskrSearch.Goal.TARGET_BOX
-        goal.timeout_sec = 30.0
+        goal.aruco_marker_id = self.get_parameter('sm_box_aruco_id').value
+        goal.timeout_sec = self.get_parameter('search_timeout_sec').value
         fut = self._search_ac.send_goal_async(goal)
         fut.add_done_callback(self._on_find_box_accepted)
 
@@ -449,11 +488,13 @@ class StateManagerNode(Node):
             self._transition(RobotState.FIND_BOX)
 
     # ---- APPROACH_BOX ----
-    def _do_approach_box(self):
+    async def _do_approach_box(self):
         if not hasattr(self, '_last_box_detection') or self._last_box_detection is None:
             self.get_logger().warning('No box detection — FIND_BOX')
             self._transition(RobotState.FIND_BOX)
             return
+        delay = self.get_parameter('sm_delay_approach_box').value
+        await asyncio.sleep(delay)
         if not self._approach_ac.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('Approach action server not available')
             self._transition(RobotState.ERROR)
@@ -490,8 +531,10 @@ class StateManagerNode(Node):
             self._transition(RobotState.FIND_BOX)
 
     # ---- DROP ----
-    def _do_drop(self):
+    async def _do_drop(self):
         self.get_logger().info('Opening gripper to drop object')
+        delay = self.get_parameter('sm_delay_drop').value
+        await asyncio.sleep(delay)
         if not self._gripper_cli.wait_for_service(timeout_sec=5.0):
             self.get_logger().error('Gripper service unavailable')
             self._transition(RobotState.ERROR)
@@ -517,7 +560,7 @@ class StateManagerNode(Node):
             self._transition(RobotState.ERROR)
 
     # ---- STOP / ERROR ----
-    def _do_stopped(self):
+    async def _do_stopped(self):
         self.get_logger().info('STOPPED: cancelling current goals and publishing WSKR/stop')
         # cancel active goals
         for key, gh in list(getattr(self, '_current_goal_handles', {}).items()):
@@ -528,7 +571,7 @@ class StateManagerNode(Node):
         # publish emergency stop
         self._stop_pub.publish(Empty())
 
-    def _do_error(self):
+    async def _do_error(self):
         self.get_logger().error('Entering ERROR state — moving to STOPPED')
         self._transition(RobotState.STOPPED)
 

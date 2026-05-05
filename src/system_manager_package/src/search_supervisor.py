@@ -126,6 +126,18 @@ from std_msgs.msg import Bool, Float32, Float32MultiArray
 
 from robot_interfaces.action import WskrSearch
 from robot_interfaces.msg import ImgDetectionData
+from system_manager_package.constants import (
+    SEARCH_ARUCO_ID,
+    SEARCH_ARUCO_STALE_TIMEOUT_SEC,
+    SEARCH_CONFIDENCE_THRESHOLD,
+    SEARCH_FLOOR_OBSTACLE_RATIO,
+    SEARCH_HEADING_CHANGE_PERIOD_SEC,
+    SEARCH_LOOK_DURATION_SEC,
+    SEARCH_MAX_HEADING_ANGLE_DEG,
+    SEARCH_POLL_INTERVAL_SEC,
+    SEARCH_TIMEOUT_SEC,
+    SEARCH_WANDER_SPEED_MPS,
+)
 
 
 IMAGE_QOS = QoSProfile(
@@ -150,6 +162,20 @@ class SearchBehavior(Node):
         self.latest_detections: Optional[ImgDetectionData] = None
         self.latest_floor_mask: Optional[np.ndarray] = None
         self.latest_aruco_markers: Optional[Float32MultiArray] = None
+        self.latest_aruco_markers_time: float = 0.0
+        self.latest_floor_mask_time: float = 0.0
+
+        # Search tuning sourced from constants.py so tuning stays centralized.
+        self.search_wander_speed_mps = SEARCH_WANDER_SPEED_MPS
+        self.search_look_duration_sec = SEARCH_LOOK_DURATION_SEC
+        self.search_confidence_threshold = SEARCH_CONFIDENCE_THRESHOLD
+        self.search_poll_interval_sec = SEARCH_POLL_INTERVAL_SEC
+        self.search_floor_obstacle_ratio = SEARCH_FLOOR_OBSTACLE_RATIO
+        self.search_aruco_stale_timeout_sec = SEARCH_ARUCO_STALE_TIMEOUT_SEC
+        self.search_heading_change_period_sec = SEARCH_HEADING_CHANGE_PERIOD_SEC
+        self.search_max_heading_angle_deg = SEARCH_MAX_HEADING_ANGLE_DEG
+        self.search_aruco_id = SEARCH_ARUCO_ID
+        self.search_timeout_sec = SEARCH_TIMEOUT_SEC
 
         cb_group = ReentrantCallbackGroup()
 
@@ -207,10 +233,12 @@ class SearchBehavior(Node):
         )
         with self.lock:
             self.latest_floor_mask = mask
+            self.latest_floor_mask_time = time.time()
 
     def _on_aruco_markers(self, msg: Float32MultiArray) -> None:
         with self.lock:
             self.latest_aruco_markers = msg
+            self.latest_aruco_markers_time = time.time()
 
     def _on_whiskers(self, msg: Float32MultiArray) -> None:
         with self.lock:
@@ -263,8 +291,8 @@ class SearchBehavior(Node):
         """
         goal = goal_handle.request
         target_type = goal.target_type
-        target_id = int(goal.target_id)
-        timeout_sec = float(goal.timeout_sec) if goal.timeout_sec > 0 else 60.0
+        target_id = int(goal.target_id) if int(goal.target_id) != 0 else int(self.search_aruco_id)
+        timeout_sec = float(goal.timeout_sec) if goal.timeout_sec > 0 else float(self.search_timeout_sec)
 
         self.get_logger().info(
             f'Search started: target={"TOY" if target_type == self.TARGET_TOY else "BOX"}, '
@@ -272,10 +300,14 @@ class SearchBehavior(Node):
         )
 
         # Implementation parameters
-        self.conf_threshold = getattr(self, 'conf_threshold', 0.7)
-        whisker_obstacle_thresh = getattr(self, 'whisker_obstacle_thresh', 200.0)
-        heading_step_deg = getattr(self, 'heading_step_deg', 20.0)
-        poll_sleep = getattr(self, 'poll_sleep', 0.05)
+        conf_threshold = float(self.search_confidence_threshold)
+        whisker_obstacle_thresh = 200.0
+        poll_sleep = float(self.search_poll_interval_sec)
+        look_duration_sec = float(self.search_look_duration_sec)
+        heading_change_period_sec = float(self.search_heading_change_period_sec)
+        wander_amplitude = float(self.search_max_heading_angle_deg)
+        stale_aruco_timeout_sec = float(self.search_aruco_stale_timeout_sec)
+        floor_obstacle_ratio = float(self.search_floor_obstacle_ratio)
 
         start_time = time.time()
         feedback = WskrSearch.Feedback()
@@ -294,14 +326,17 @@ class SearchBehavior(Node):
             detections_sampled += 1
             # confidences may be empty — iterate
             for conf in getattr(det, 'confidence', []) or []:
-                if conf >= self.conf_threshold:
+                if conf >= conf_threshold:
                     return det
             return None
 
         def _check_for_box(tid: int):
             with self.lock:
                 markers = self.latest_aruco_markers
+                markers_time = self.latest_aruco_markers_time
             if markers is None or not getattr(markers, 'data', None):
+                return None
+            if time.time() - markers_time > stale_aruco_timeout_sec:
                 return None
             data = markers.data
             # markers use 9 entries per marker: id,x0,y0,...x3,y3
@@ -332,9 +367,27 @@ class SearchBehavior(Node):
                     return det
             return None
 
+        def _floor_obstacle_detected() -> bool:
+            with self.lock:
+                floor_mask = None if self.latest_floor_mask is None else np.copy(self.latest_floor_mask)
+                floor_time = self.latest_floor_mask_time
+            if floor_mask is None or floor_mask.size == 0:
+                return False
+            if floor_time > 0.0 and (time.time() - floor_time) > stale_aruco_timeout_sec:
+                return False
+            height, width = floor_mask.shape[:2]
+            sample_w = max(1, int(width * 0.5))
+            sample_h = max(1, int(height * 0.25))
+            x0 = max(0, (width - sample_w) // 2)
+            y0 = max(0, height - sample_h)
+            sample = floor_mask[y0:y0 + sample_h, x0:x0 + sample_w]
+            if sample.size == 0:
+                return False
+            non_floor_ratio = float(np.count_nonzero(sample < 128)) / float(sample.size)
+            return non_floor_ratio >= floor_obstacle_ratio
+
         # wander variables (triangle wave)
-        wander_amplitude = 45.0
-        wander_period = 8.0
+        wander_period = max(heading_change_period_sec, 0.1)
 
         try:
             while time.time() - start_time < timeout_sec:
@@ -349,22 +402,27 @@ class SearchBehavior(Node):
 
                 # compute heading using whiskers if available
                 heading = 0.0
+                phase = 'looking'
                 with self.lock:
                     whiskers = None if self.latest_whiskers is None else np.copy(self.latest_whiskers)
-                if whiskers is not None and whiskers.size >= 11:
+                cycle_time = elapsed % max(look_duration_sec + wander_period, 0.1)
+                if cycle_time < look_duration_sec:
+                    phase = 'looking'
+                    heading = 0.0
+                elif whiskers is not None and whiskers.size >= 11:
                     left = float(np.mean(whiskers[:5]))
                     right = float(np.mean(whiskers[6:11]))
                     if left < whisker_obstacle_thresh:
-                        heading = -heading_step_deg
+                        heading = -wander_amplitude
                         phase = 'avoiding_left'
                     elif right < whisker_obstacle_thresh:
-                        heading = heading_step_deg
+                        heading = wander_amplitude
                         phase = 'avoiding_right'
                     else:
                         # forward wander small oscillation
                         phase = 'wandering'
                         # triangle wave between -amplitude..+amplitude
-                        t = (elapsed % wander_period) / wander_period
+                        t = ((cycle_time - look_duration_sec) % wander_period) / wander_period
                         if t < 0.5:
                             heading = -wander_amplitude + (t / 0.5) * (2 * wander_amplitude)
                         else:
@@ -372,11 +430,15 @@ class SearchBehavior(Node):
                 else:
                     # no whiskers — deterministic wander
                     phase = 'wandering'
-                    t = (elapsed % wander_period) / wander_period
+                    t = ((cycle_time - look_duration_sec) % wander_period) / wander_period
                     if t < 0.5:
                         heading = -wander_amplitude + (t / 0.5) * (2 * wander_amplitude)
                     else:
                         heading = wander_amplitude - ((t - 0.5) / 0.5) * (2 * wander_amplitude)
+
+                if _floor_obstacle_detected():
+                    heading = -wander_amplitude if int(elapsed) % 2 == 0 else wander_amplitude
+                    phase = 'floor_obstacle'
 
                 # publish heading
                 self._publish_heading(heading)
