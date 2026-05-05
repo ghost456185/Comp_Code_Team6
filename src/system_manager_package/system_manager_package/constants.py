@@ -19,7 +19,7 @@ Usage from any ROS node::
 import math
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  GSTREAMER CAMERA                                              ║
+# ║  GSTREAMER CAMERA                                                ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 CAMERA_DEVICE = '/dev/video0'                   # V4L2 device path
@@ -28,13 +28,22 @@ CAMERA_HEIGHT = 1080                            # capture resolution height (px)
 CAMERA_FPS = 30                                 # capture framerate
 CAMERA_PUBLISH_HZ = 10.0                        # throttled publish rate to DDS (Hz)
 CAMERA_FRAME_ID = 'camera_frame'                # TF frame stamped on images
-CAMERA_BRIGHTNESS = -25
-CAMERA_CONTRAST = 32
-CAMERA_SATURATION = 91
-CAMERA_GAMMA = 150
+CAMERA_BRIGHTNESS = -31                         # V4L2 brightness  [-64, 64]
+CAMERA_CONTRAST = 5                             # V4L2 contrast    [0, 64]
+CAMERA_SATURATION = 100                         # V4L2 saturation  [0, 128]
+CAMERA_HUE = 0                                  # V4L2 hue         [-40, 40]
+CAMERA_WHITE_BALANCE_AUTO = 1                   # V4L2 white_balance_temperature_auto (bool)
+CAMERA_GAMMA = 100                              # V4L2 gamma       [72, 500]
+CAMERA_GAIN = 0                                 # V4L2 gain        [0, 100]
+CAMERA_POWER_LINE_FREQ = 1                      # V4L2 power_line_frequency (0=off, 1=50Hz, 2=60Hz)
+CAMERA_WHITE_BALANCE_TEMP = 4600                # V4L2 white_balance_temperature [2800, 6500]
+CAMERA_SHARPNESS = 2                            # V4L2 sharpness   [0, 6]
+CAMERA_BACKLIGHT_COMP = 2                       # V4L2 backlight_compensation [0, 2]
+CAMERA_EXPOSURE_AUTO = 1                        # V4L2 exposure_auto (1=Manual, 3=Aperture Priority)
+CAMERA_EXPOSURE_ABSOLUTE = 112                  # V4L2 exposure_time_absolute [1, 5000]
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  ARDUINO / SERIAL BRIDGE                                       ║
+# ║  ARDUINO / SERIAL BRIDGE                                         ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 SERIAL_PORT = '/dev/ttyACM1'                    # USB serial port to Arduino
@@ -46,7 +55,7 @@ SERIAL_TURN_SCALE = 1.0                         # motor turn scaling factor
 HEADING_TRIM_DEG = -8.6                        # heading trim (degrees)
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  WSKR — FLOOR DETECTION  (wskr_floor_node)                    ║
+# ║  WSKR — FLOOR DETECTION  (wskr_floor_node)                       ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 FLOOR_RESIZE_WIDTH = 640                        # processing resolution width (px)
@@ -61,7 +70,7 @@ FLOOR_GRADIENT_THRESH = 14                      # Laplacian edge magnitude thres
 FLOOR_HIGHLIGHT_THRESH = 230                    # L-channel above which is specular highlight
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  WSKR — WHISKER RANGE  (wskr_range_node)                      ║
+# ║  WSKR — WHISKER RANGE  (wskr_range_node)                         ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 WHISKER_MAX_RANGE_MM = 500.0                    # max ray-march distance per whisker (mm)
@@ -71,7 +80,7 @@ WHISKER_BBOX_MIN_WIDTH_FRAC = 0.15              # min bbox width as fraction of 
 WHISKER_OVERLAY_JPEG_QUALITY = 70               # JPEG quality for diagnostic overlay image
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  WSKR — LENS MODEL  (shared across approach + range nodes)    ║
+# ║  WSKR — LENS MODEL  (shared across approach + range nodes)       ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 # All values are width-normalized from a 1920-wide reference calibration.
@@ -83,7 +92,7 @@ LENS_TILT_DEG = 30.0                           # camera tilt angle from horizont
 LENS_Y_OFFSET = 0.0                            # vertical offset (normalized by width)
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  WSKR — DEAD RECKONING FUSER                                  ║
+# ║  WSKR — DEAD RECKONING FUSER                                     ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 DR_HANDOFF_DEG = 80.0                          # |heading| above which switches to dead-reckoning
@@ -92,7 +101,7 @@ DR_VISUAL_OBS_FRESHNESS_S = 0.5                # stale visual observation timeou
 DR_PUBLISH_RATE_HZ = 10.0                        # fused heading publish rate (Hz); matches Arduino + camera input rates
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  WSKR — AUTOPILOT  (MLP-based reactive controller)            ║
+# ║  WSKR — AUTOPILOT  (MLP-based reactive controller)               ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 AUTOPILOT_MODEL_FILENAME = 'your_MLP_model_here.json'  # trained MLP policy filename (in share/wskr/models/)
@@ -109,7 +118,7 @@ AUTOPILOT_PROXIMITY_SPEED_MAX = 10.0             # drive speed scale at max dist
 AUTOPILOT_PROXIMITY_SPEED_MIN = 0.1             # drive speed scale floor at min distance
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  WSKR — APPROACH ACTION SERVER                                ║
+# ║  WSKR — APPROACH ACTION SERVER                                   ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 APPROACH_TIMEOUT_SEC = 999.0                    # hard timeout for a single approach goal (s)
@@ -128,7 +137,7 @@ APPROACH_TRACK_IOU_HANDOFF = 0.25               # min IoU for adopting a new Byt
 APPROACH_YOLO_STALENESS_WARN_SEC = 0.3          # log-only: warn when YOLO stream is stale (s)
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  VISION PROCESSING  (YOLO inference + ByteTrack)               ║
+# ║  VISION PROCESSING  (YOLO inference + ByteTrack)                 ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 YOLO_INPUT_SIZE = 640                           # model input resolution (square, px)
@@ -142,7 +151,7 @@ YOLO_BBOX_TIMEOUT_SEC = 5.0                     # timeout for bbox-to-XYZ servic
 YOLO_SIGNED_AR_ROTATION_DEG = '15'              # rotation angle for signed aspect-ratio estimation
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  OBJECT SELECTION  (picks best detection from YOLO frame)      ║
+# ║  OBJECT SELECTION  (picks best detection from YOLO frame)        ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 SELECTION_CLASS_PRIORITIES = [                  # class ranking: lower index = higher priority
@@ -156,7 +165,7 @@ SELECTION_CLASS_PRIORITIES = [                  # class ranking: lower index = h
 SELECTION_MIN_CONFIDENCE = 0.5                  # discard detections below this confidence
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  SEARCH BEHAVIOR  (wander + detect action server)              ║
+# ║  SEARCH BEHAVIOR  (wander + detect action server)                ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 SEARCH_WANDER_SPEED_MPS = 0.05                  # forward speed during wander (m/s)
@@ -171,7 +180,7 @@ SEARCH_ARUCO_ID = 0                             # default ArUco marker ID for bo
 SEARCH_TIMEOUT_SEC = 60.0                       # default timeout for search goals (s)
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  STATE MANAGER  (FSM orchestrator)                             ║
+# ║  STATE MANAGER  (FSM orchestrator)                               ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 # Delay (seconds) between entering a state and firing its handler.
@@ -190,13 +199,13 @@ SM_MAX_GRASP_RETRIES = 1                         # times to retry a failed grasp
 SM_BOX_ARUCO_ID = 0                              # ArUco marker ID that identifies the drop box
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  XARM — HARDWARE NODE                                         ║
+# ║  XARM — HARDWARE NODE                                            ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 GRIPPER_OPEN_COUNT = 211.0                      # servo count for fully open gripper
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  XARM — GRASP ACTION SERVER  (collection pipeline)            ║
+# ║  XARM — GRASP ACTION SERVER  (collection pipeline)               ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 GRIPPER_CLOSE_COUNT = 687.0                     # servo count for fully closed gripper
@@ -214,7 +223,7 @@ GRASP_ACTION_WAIT_TIMEOUT_S = 5.0               # timeout waiting for play_waypo
 GRASP_GOAL_ACCEPTANCE_TIMEOUT_S = 5.0            # timeout waiting for goal acceptance (s)
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  XARM — GENETIC ALGORITHM  (trajectory planner)               ║
+# ║  XARM — GENETIC ALGORITHM  (trajectory planner)                  ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 # Link lengths (mm) — physical arm segment dimensions
@@ -256,7 +265,7 @@ GA_CONVERGENCE_TOLERANCE = 0.01                 # min improvement over 10 genera
 GA_COLLISION_VOLUMES = [[-500.0, 190.0, 110.0, 388.0]]
 
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  FOXGLOVE BRIDGE  (WebSocket diagnostic server)                ║
+# ║  FOXGLOVE BRIDGE  (WebSocket diagnostic server)                  ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 FOXGLOVE_WS_PORT = 8765                         # WebSocket listen port

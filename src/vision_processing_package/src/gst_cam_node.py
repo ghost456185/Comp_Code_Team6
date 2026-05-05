@@ -21,36 +21,47 @@ assumes a single 1080p @ 30 fps MJPEG USB camera on ``/dev/video0``.
 """
 from __future__ import annotations
 
+
 import sys
 import threading
 from typing import Optional
+
 
 import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import GLib, Gst  # noqa: E402  (needs gi.require_version first)
 
+ 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage
 
+ 
+
 from system_manager_package.constants import (
-    CAMERA_DEVICE,
+    CAMERA_BACKLIGHT_COMP,
     CAMERA_BRIGHTNESS,
     CAMERA_CONTRAST,
-    CAMERA_SATURATION,
-    CAMERA_GAMMA,
+    CAMERA_DEVICE,
+    CAMERA_EXPOSURE_ABSOLUTE,
+    CAMERA_EXPOSURE_AUTO,
     CAMERA_FPS,
     CAMERA_FRAME_ID,
-    CAMERA_HEIGHT,
-    CAMERA_PUBLISH_HZ,
-    CAMERA_WIDTH,
-    CAMERA_BRIGHTNESS,
-    CAMERA_CONTRAST,
-    CAMERA_SATURATION,
+    CAMERA_GAIN,
     CAMERA_GAMMA,
+    CAMERA_HEIGHT,
+    CAMERA_HUE,
+    CAMERA_POWER_LINE_FREQ,
+    CAMERA_PUBLISH_HZ,
+    CAMERA_SATURATION,
+    CAMERA_SHARPNESS,
+    CAMERA_WHITE_BALANCE_AUTO,
+    CAMERA_WHITE_BALANCE_TEMP,
+    CAMERA_WIDTH,
 )
 
+ 
 
 IMAGE_QOS = QoSProfile(
     reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -58,8 +69,23 @@ IMAGE_QOS = QoSProfile(
     depth=1,
 )
 
+ 
+
 DEFAULT_PIPELINE = (
-    f'v4l2src device={CAMERA_DEVICE} extra-controls="s,brightness={CAMERA_BRIGHTNESS},contrast={CAMERA_CONTRAST},saturation={CAMERA_SATURATION},gamma={CAMERA_GAMMA}" ! '
+    f'v4l2src device={CAMERA_DEVICE}'
+    f' extra-controls="s,brightness={CAMERA_BRIGHTNESS}'
+    f',contrast={CAMERA_CONTRAST}'
+    f',saturation={CAMERA_SATURATION}'
+    f',hue={CAMERA_HUE}'
+    f',white_balance_temperature_auto={CAMERA_WHITE_BALANCE_AUTO}'
+    f',gamma={CAMERA_GAMMA}'
+    f',gain={CAMERA_GAIN}'
+    f',power_line_frequency={CAMERA_POWER_LINE_FREQ}'
+    f',white_balance_temperature={CAMERA_WHITE_BALANCE_TEMP}'
+    f',sharpness={CAMERA_SHARPNESS}'
+    f',backlight_compensation={CAMERA_BACKLIGHT_COMP}'
+    f',exposure_auto={CAMERA_EXPOSURE_AUTO}'
+    f',exposure_absolute={CAMERA_EXPOSURE_ABSOLUTE}" ! '
     f'image/jpeg, width={CAMERA_WIDTH}, height={CAMERA_HEIGHT}, framerate={CAMERA_FPS}/1 ! '
     'appsink name=sink max-buffers=1 drop=true sync=false'
 )
