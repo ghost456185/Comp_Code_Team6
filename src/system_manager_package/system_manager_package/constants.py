@@ -95,8 +95,8 @@ LENS_Y_OFFSET = 0.0                            # vertical offset (normalized by 
 # ║  WSKR — DEAD RECKONING FUSER                                     ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-DR_HANDOFF_DEG = 80.0                          # |heading| above which switches to dead-reckoning
-DR_VISUAL_REACQUIRE_DEG = 60.0                 # |heading| below which reacquires visual tracking
+DR_HANDOFF_DEG = 85.0                          # |heading| above which switches to dead-reckoning
+DR_VISUAL_REACQUIRE_DEG = 85.0                # |heading| below which reacquires visual tracking
 DR_VISUAL_OBS_FRESHNESS_S = 0.5                # stale visual observation timeout (s)
 DR_PUBLISH_RATE_HZ = 10.0                        # fused heading publish rate (Hz); matches Arduino + camera input rates
 
@@ -122,7 +122,7 @@ AUTOPILOT_PROXIMITY_SPEED_MIN = 0.1             # drive speed scale floor at min
 # ╚══════════════════════════════════════════════════════════════════╝
 
 APPROACH_TIMEOUT_SEC = 999.0                    # hard timeout for a single approach goal (s)
-APPROACH_PROXIMITY_SUCCESS_MM = 150.0           # target-whisker distance for goal success (mm)
+APPROACH_PROXIMITY_SUCCESS_MM = 75.0           # target-whisker distance for goal success (mm)
 APPROACH_TARGET_LOST_TIMEOUT_SEC = 7.0          # abort after this long without reacquiring target (s)
 APPROACH_REACQUIRE_THRESHOLD = 0.55             # template-match NCC threshold for re-acquisition
 APPROACH_REACQUIRE_FAILURE_DEG = 30.0           # heading cone inside which reacquire-abort fires (deg)

@@ -149,7 +149,7 @@ class ApproachServiceBridge(Node):
 
         self.declare_parameter('seek_turn_rate_rad_s', 0.30)
         self.declare_parameter('seek_timeout_sec', SEARCH_TIMEOUT_SEC)
-        self.declare_parameter('seek_cmd_rate_hz', 4.0)
+        self.declare_parameter('seek_cmd_rate_hz', 10.0)
         self.declare_parameter('seek_marker_stale_sec', 0.8)
 
         self._seek_turn_rate = float(self.get_parameter('seek_turn_rate_rad_s').value)
@@ -162,6 +162,11 @@ class ApproachServiceBridge(Node):
         self._latest_aruco_time = 0.0
         self._seek_cancel_event = threading.Event()
 
+        # Timer-based turning to prevent command spam
+        self._seek_cmd_lock = threading.Lock()
+        self._seek_yaw_rate = 0.0
+        self._seek_active = False
+
         # ReentrantCallbackGroup + MultiThreadedExecutor so a service
         # callback can spin-wait on the action's send_goal future without
         # deadlocking the executor.
@@ -172,6 +177,10 @@ class ApproachServiceBridge(Node):
             Float32MultiArray, 'WSKR/aruco_markers', self._on_aruco_markers, 10,
             callback_group=cb,
         )
+
+        # Create timer to publish seek commands at a consistent rate (prevents spam)
+        seek_publish_rate = max(1.0, self._seek_cmd_rate_hz)
+        self.create_timer(1.0 / seek_publish_rate, self._publish_seek_cmd_tick, callback_group=cb)
 
         self._approach = _ActionBridge(self, ApproachObjectAction, 'WSKR/approach_object', cb)
         self._search = _ActionBridge(self, WskrSearchAction, 'WSKR/search_behavior', cb)
@@ -248,8 +257,25 @@ class ApproachServiceBridge(Node):
         msg.angular.z = float(yaw_rate)
         self._cmd_pub.publish(msg)
 
+    def _publish_seek_cmd_tick(self) -> None:
+        """Timer callback: publish the current seek yaw rate at a consistent interval.
+        
+        Always publishes when seeking is active to keep the command fresh and
+        prevent interference from competing publishers.
+        """
+        with self._seek_cmd_lock:
+            active = self._seek_active
+            yaw_rate = self._seek_yaw_rate if self._seek_active else 0.0
+        
+        if active:
+            msg = Twist()
+            msg.angular.z = yaw_rate
+            self._cmd_pub.publish(msg)
+
     def _stop_seek_cmd(self) -> None:
-        self._publish_seek_cmd(0.0)
+        with self._seek_cmd_lock:
+            self._seek_yaw_rate = 0.0
+            self._seek_active = False
 
     def _seek_for_aruco(self, target_id: int) -> tuple[bool, str]:
         target_id = int(target_id)
@@ -258,39 +284,36 @@ class ApproachServiceBridge(Node):
 
         self._seek_cancel_event.clear()
         deadline = time.monotonic() + max(0.5, self._seek_timeout_sec)
-        publish_period = 1.0 / max(1.0, self._seek_cmd_rate_hz)
         poll_sleep = 0.05
         yaw_rate = self._seek_turn_rate
-        last_publish_t = 0.0
 
         self.get_logger().info(
             f'ArUco seek start id={target_id}, yaw_rate={yaw_rate:.2f} rad/s, '
             f'timeout={self._seek_timeout_sec:.1f}s'
         )
 
-        # Send the turn command once, then keep it alive only as often as the
-        # drive bridge needs to prevent command timeout. Visibility is polled
-        # independently so the service can stop the turn quickly when the tag
-        # appears without spamming identical turn commands.
-        self._publish_seek_cmd(yaw_rate)
-        last_publish_t = time.monotonic()
+        # Set the turn command rate; the timer will publish it consistently.
+        with self._seek_cmd_lock:
+            self._seek_yaw_rate = yaw_rate
+            self._seek_active = True
 
         while time.monotonic() < deadline:
             if self._seek_cancel_event.is_set():
-                self._stop_seek_cmd()
+                with self._seek_cmd_lock:
+                    self._seek_yaw_rate = 0.0
+                    self._seek_active = False
                 return False, 'ArUco seek cancelled.'
             if self._is_aruco_visible(target_id):
-                self._stop_seek_cmd()
+                with self._seek_cmd_lock:
+                    self._seek_yaw_rate = 0.0
+                    self._seek_active = False
                 return True, f'ArUco {target_id} acquired during seek.'
-
-            now = time.monotonic()
-            if (now - last_publish_t) >= publish_period:
-                self._publish_seek_cmd(yaw_rate)
-                last_publish_t = now
 
             time.sleep(poll_sleep)
 
-        self._stop_seek_cmd()
+        with self._seek_cmd_lock:
+            self._seek_yaw_rate = 0.0
+            self._seek_active = False
         return False, f'Timeout seeking ArUco {target_id}.'
 
     # ---------------------------------------------------------------- approach

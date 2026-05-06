@@ -119,6 +119,13 @@ class WSKRApproachActionServer(Node):
         self.declare_parameter('class_change_abort_sec', APPROACH_CLASS_CHANGE_ABORT_SEC)
         self.declare_parameter('track_iou_handoff_threshold', APPROACH_TRACK_IOU_HANDOFF)
         self.declare_parameter('yolo_staleness_warn_sec', APPROACH_YOLO_STALENESS_WARN_SEC)
+        
+        # Alignment parameters: stop and center before declaring proximity success
+        self.declare_parameter('approach_align_deadband_deg', 5.0)
+        self.declare_parameter('approach_align_kp', 1.0)
+        self.declare_parameter('approach_align_rate_hz', 10.0)
+        self.declare_parameter('approach_align_timeout_s', 3.0)
+        self.declare_parameter('approach_align_max_rate_rad_s', 0.5)
 
         # Lens params (normalized, for in-process heading computation).
         _lp = LensParams()
@@ -142,6 +149,13 @@ class WSKRApproachActionServer(Node):
         self.class_change_abort_sec = float(self.get_parameter('class_change_abort_sec').value)
         self.track_iou_handoff_threshold = float(self.get_parameter('track_iou_handoff_threshold').value)
         self.yolo_staleness_warn_sec = float(self.get_parameter('yolo_staleness_warn_sec').value)
+        
+        # Alignment params
+        self._align_deadband_deg = float(self.get_parameter('approach_align_deadband_deg').value)
+        self._align_kp = float(self.get_parameter('approach_align_kp').value)
+        self._align_rate_hz = float(self.get_parameter('approach_align_rate_hz').value)
+        self._align_timeout_s = float(self.get_parameter('approach_align_timeout_s').value)
+        self._align_max_rate_rad_s = float(self.get_parameter('approach_align_max_rate_rad_s').value)
 
         self._lens_lock = threading.Lock()
         self._lens_params = self._read_lens_params()
@@ -1092,13 +1106,54 @@ class WSKRApproachActionServer(Node):
                 and float(np.min(self.latest_target_whiskers)) < self.proximity_success_mm
             ):
                 closest_mm = float(np.min(self.latest_target_whiskers))
+                # Immediate hard stop to Arduino
                 self.stop_pub.publish(Empty())
-                result.proximity_success = True
-                result.movement_message = (
-                    f'Target bbox within {closest_mm:.0f} mm '
-                    f'(threshold {self.proximity_success_mm:.0f} mm)'
-                )
-                goal_handle.succeed()
+
+                # Alignment loop: proportional control on heading until within deadband
+                align_start = time.time()
+                aligned = False
+                period = 1.0 / max(1.0, self._align_rate_hz)
+                while rclpy.ok() and (time.time() - align_start) < self._align_timeout_s:
+                    if goal_handle.is_cancel_requested:
+                        result.movement_success = False
+                        result.movement_message = 'Goal canceled during alignment'
+                        goal_handle.canceled()
+                        break
+
+                    # Choose heading source: fused heading (last_heading_deg)
+                    with self.lock:
+                        heading_deg = float(self.last_heading_deg)
+
+                    # Check deadband
+                    if abs(heading_deg) <= self._align_deadband_deg:
+                        aligned = True
+                        break
+
+                    # Compute yaw command (kp * error_rad) and clamp
+                    error_rad = math.radians(heading_deg)
+                    yaw_cmd = max(-self._align_max_rate_rad_s, min(self._align_max_rate_rad_s, self._align_kp * error_rad))
+                    tw = Twist()
+                    tw.angular.z = float(yaw_cmd)
+                    self.cmd_pub.publish(tw)
+
+                    time.sleep(period)
+
+                # Ensure we stop rotation
+                self.cmd_pub.publish(Twist())
+
+                if aligned:
+                    result.proximity_success = True
+                    result.movement_message = (
+                        f'Target bbox within {closest_mm:.0f} mm '
+                        f'(threshold {self.proximity_success_mm:.0f} mm)'
+                    )
+                    goal_handle.succeed()
+                else:
+                    result.proximity_success = False
+                    result.movement_success = False
+                    result.movement_message = f'Alignment failed or timed out after {self._align_timeout_s:.1f}s'
+                    self.get_logger().warn(result.movement_message)
+                    goal_handle.abort()
                 break
 
             time.sleep(0.05)
