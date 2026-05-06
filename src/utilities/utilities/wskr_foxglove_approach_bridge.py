@@ -47,10 +47,12 @@ import time
 from typing import Optional
 
 import rclpy
+from geometry_msgs.msg import Twist
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from std_msgs.msg import Float32MultiArray
 from std_srvs.srv import Trigger
 
 from robot_interfaces.action import (
@@ -64,11 +66,13 @@ from robot_interfaces.srv import (
     StartSearch,
     StartGrasp,
 )
+from system_manager_package.constants import SEARCH_TIMEOUT_SEC
 
 
 ACTION_SERVER_WAIT_TIMEOUT_S = 2.0
 GOAL_ACCEPTANCE_TIMEOUT_S = 5.0
 ACTION_RESULT_TIMEOUT_S = 180.0
+ARUCO_MARKER_STRIDE = 9
 
 
 def _wait_for_future(future, timeout_s: float) -> None:
@@ -143,10 +147,31 @@ class ApproachServiceBridge(Node):
     def __init__(self) -> None:
         super().__init__('wskr_foxglove_bridge')
 
+        self.declare_parameter('seek_turn_rate_rad_s', 0.30)
+        self.declare_parameter('seek_timeout_sec', SEARCH_TIMEOUT_SEC)
+        self.declare_parameter('seek_cmd_rate_hz', 8.0)
+        self.declare_parameter('seek_marker_stale_sec', 0.8)
+
+        self._seek_turn_rate = float(self.get_parameter('seek_turn_rate_rad_s').value)
+        self._seek_timeout_sec = float(self.get_parameter('seek_timeout_sec').value)
+        self._seek_cmd_rate_hz = float(self.get_parameter('seek_cmd_rate_hz').value)
+        self._seek_marker_stale_sec = float(self.get_parameter('seek_marker_stale_sec').value)
+
+        self._aruco_lock = threading.Lock()
+        self._latest_aruco_ids: set[int] = set()
+        self._latest_aruco_time = 0.0
+        self._seek_cancel_event = threading.Event()
+
         # ReentrantCallbackGroup + MultiThreadedExecutor so a service
         # callback can spin-wait on the action's send_goal future without
         # deadlocking the executor.
         cb = ReentrantCallbackGroup()
+
+        self._cmd_pub = self.create_publisher(Twist, 'WSKR/cmd_vel', 10)
+        self.create_subscription(
+            Float32MultiArray, 'WSKR/aruco_markers', self._on_aruco_markers, 10,
+            callback_group=cb,
+        )
 
         self._approach = _ActionBridge(self, ApproachObjectAction, 'WSKR/approach_object', cb)
         self._search = _ActionBridge(self, WskrSearchAction, 'WSKR/search_behavior', cb)
@@ -196,6 +221,65 @@ class ApproachServiceBridge(Node):
             'grasp/cancel aliases for xarm_grasp.'
         )
 
+    def _on_aruco_markers(self, msg: Float32MultiArray) -> None:
+        data = msg.data or []
+        ids: set[int] = set()
+        for off in range(0, len(data) - (ARUCO_MARKER_STRIDE - 1), ARUCO_MARKER_STRIDE):
+            try:
+                ids.add(int(data[off]))
+            except Exception:
+                continue
+        with self._aruco_lock:
+            self._latest_aruco_ids = ids
+            self._latest_aruco_time = time.monotonic()
+
+    def _is_aruco_visible(self, target_id: int) -> bool:
+        with self._aruco_lock:
+            ids = set(self._latest_aruco_ids)
+            seen_t = self._latest_aruco_time
+        if not ids:
+            return False
+        if (time.monotonic() - seen_t) > self._seek_marker_stale_sec:
+            return False
+        return int(target_id) in ids
+
+    def _publish_seek_cmd(self, yaw_rate: float) -> None:
+        msg = Twist()
+        msg.angular.z = float(yaw_rate)
+        self._cmd_pub.publish(msg)
+
+    def _stop_seek_cmd(self) -> None:
+        self._publish_seek_cmd(0.0)
+
+    def _seek_for_aruco(self, target_id: int) -> tuple[bool, str]:
+        target_id = int(target_id)
+        if self._is_aruco_visible(target_id):
+            return True, f'ArUco {target_id} already visible.'
+
+        self._seek_cancel_event.clear()
+        deadline = time.monotonic() + max(0.5, self._seek_timeout_sec)
+        rate_hz = max(1.0, self._seek_cmd_rate_hz)
+        sleep_s = 1.0 / rate_hz
+        yaw_rate = self._seek_turn_rate
+
+        self.get_logger().info(
+            f'ArUco seek start id={target_id}, yaw_rate={yaw_rate:.2f} rad/s, '
+            f'timeout={self._seek_timeout_sec:.1f}s'
+        )
+
+        while time.monotonic() < deadline:
+            if self._seek_cancel_event.is_set():
+                self._stop_seek_cmd()
+                return False, 'ArUco seek cancelled.'
+            if self._is_aruco_visible(target_id):
+                self._stop_seek_cmd()
+                return True, f'ArUco {target_id} acquired during seek.'
+            self._publish_seek_cmd(yaw_rate)
+            time.sleep(sleep_s)
+
+        self._stop_seek_cmd()
+        return False, f'Timeout seeking ArUco {target_id}.'
+
     # ---------------------------------------------------------------- approach
     def _on_approach_start(
         self,
@@ -223,6 +307,18 @@ class ApproachServiceBridge(Node):
         goal.object_id = int(request.id)
         goal.selected_obj = sel if sel is not None else ImgDetectionData()
 
+        # For ArUco/BOX goals: actively seek by slow one-direction turning
+        # until the requested marker is visible, then hand off to approach.
+        if goal.target_type == ApproachObjectAction.Goal.TARGET_BOX:
+            ok, seek_msg = self._seek_for_aruco(goal.object_id)
+            if not ok:
+                response.movement_success = False
+                response.proximity_success = False
+                response.movement_message = seek_msg
+                self.get_logger().warn(seek_msg)
+                return response
+            self.get_logger().info(seek_msg)
+
         err = self._approach.send(goal)
         if err is not None:
             response.movement_success = False
@@ -244,9 +340,15 @@ class ApproachServiceBridge(Node):
         _request: Trigger.Request,
         response: Trigger.Response,
     ) -> Trigger.Response:
+        self._seek_cancel_event.set()
+        self._stop_seek_cmd()
         ok, msg = self._approach.cancel()
-        response.success = ok
-        response.message = msg
+        if ok:
+            response.success = True
+            response.message = msg
+        else:
+            response.success = True
+            response.message = f'{msg} Seek stop requested.'
         self.get_logger().info(msg)
         return response
 

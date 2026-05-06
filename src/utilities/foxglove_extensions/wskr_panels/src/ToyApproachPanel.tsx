@@ -238,22 +238,32 @@ function ApproachPanel({ context }: { context: PanelExtensionContext }): JSX.Ele
 
   // ── service calls ─────────────────────────────────────────────────────
 
-  const callApproach = useCallback(async (request: Record<string, unknown>, label: string) => {
+  const callApproach = useCallback(async (
+    request: Record<string, unknown>,
+    label: string,
+    manageBusy = true,
+  ) => {
     if (!context.callService) {
       setStatusMsg("callService not available in this Foxglove version.");
-      return;
+      return false;
     }
-    setBusy(true);
+    if (manageBusy) {
+      setBusy(true);
+    }
     setStatusMsg(`Dispatching ${label}…`);
     try {
       const resp = await context.callService(config.approachService, request) as Record<string, unknown>;
       const ok  = resp.movement_success as boolean;
       const msg = (resp.movement_message as string) || (ok ? "Dispatched." : "Rejected.");
       setStatusMsg(msg);
+      return Boolean(ok);
     } catch (err) {
       setStatusMsg(`Service call failed: ${err}`);
+      return false;
     } finally {
-      setBusy(false);
+      if (manageBusy) {
+        setBusy(false);
+      }
     }
   }, [context, config.approachService]);
 
@@ -286,11 +296,16 @@ function ApproachPanel({ context }: { context: PanelExtensionContext }): JSX.Ele
   }, [callApproach]);
 
   const handleStartAruco = useCallback(async () => {
+    const targetId = Math.max(0, Math.trunc(arucoId));
+    if (!Number.isFinite(targetId)) {
+      setStatusMsg("Invalid ArUco ID.");
+      return;
+    }
     await callApproach({
-      id: arucoId,
-      selected_obj: EMPTY_DETECTION, // empty class_name → bridge routes as TARGET_BOX
-    }, `ArUco approach (ID:${arucoId})`);
-  }, [callApproach, arucoId]);
+      id: targetId,
+      selected_obj: EMPTY_DETECTION,
+    }, `ArUco approach (ID:${targetId})`);
+  }, [arucoId, callApproach]);
 
   const handleCancel = useCallback(async () => {
     if (!context.callService) {
