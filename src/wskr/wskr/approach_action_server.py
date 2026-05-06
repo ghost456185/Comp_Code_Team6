@@ -122,10 +122,10 @@ class WSKRApproachActionServer(Node):
         
         # Alignment parameters: stop and center before declaring proximity success
         self.declare_parameter('approach_align_deadband_deg', 5.0)
-        self.declare_parameter('approach_align_kp', 0.75) # P gain for alignment turn rate
+        self.declare_parameter('approach_align_kp', 0.4) # P gain for alignment turn rate
         self.declare_parameter('approach_align_rate_hz', 10.0)
-        self.declare_parameter('approach_align_timeout_s', 3.0)
-        self.declare_parameter('approach_align_max_rate_rad_s', 0.5)
+        self.declare_parameter('approach_align_timeout_s', 30.0)
+        self.declare_parameter('approach_align_max_rate_rad_s', 0.2)
 
         # Lens params (normalized, for in-process heading computation).
         _lp = LensParams()
@@ -1147,6 +1147,10 @@ class WSKRApproachActionServer(Node):
                         f'Target bbox within {closest_mm:.0f} mm '
                         f'(threshold {self.proximity_success_mm:.0f} mm)'
                     )
+                    self.get_logger().info(
+                        f'Approach alignment succeeded: {result.movement_message} '
+                        f'movement_success={result.movement_success} proximity_success={result.proximity_success}'
+                    )
                     goal_handle.succeed()
                 else:
                     result.proximity_success = False
@@ -1174,6 +1178,14 @@ class WSKRApproachActionServer(Node):
         self.yolo_enable_pub.publish(Bool(data=True))
         self.tracked_bbox_pub.publish(TrackedBbox())
         self.cmd_pub.publish(Twist())
+        # Log final approach result for debugging and to help state_manager trace
+        try:
+            self.get_logger().info(
+                f'Approach action completed: movement_success={result.movement_success} '
+                f'proximity_success={result.proximity_success} message="{getattr(result, "movement_message", "")}"'
+            )
+        except Exception:
+            pass
         return result
 
 

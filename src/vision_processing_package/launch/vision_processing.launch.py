@@ -28,7 +28,7 @@ def generate_launch_description():
 
     bbox_to_xyz_mode_arg = DeclareLaunchArgument(
         'bbox_to_xyz_mode',
-        default_value='2d',
+        default_value='simple',
     )
 
     gstreamer_camera_node = Node(

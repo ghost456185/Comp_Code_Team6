@@ -160,7 +160,7 @@ class StateManagerNode(Node):
         super().__init__('state_manager_node')
 
         self._state = RobotState.IDLE
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.selected_object = None
         self._last_detection = None
         self._current_goal_handles = {}
@@ -247,7 +247,7 @@ class StateManagerNode(Node):
     def _on_command(self, msg: String):
         """Handle incoming commands from /robot_command."""
         cmd = msg.data.strip().lower()
-        self.get_logger().info(f'Got command: {cmd}')
+        self.get_logger().warning(f'=== _on_command: Got command: "{cmd}" ===')
         if cmd == 'search':
             self._transition(RobotState.SEARCH)
         elif cmd == 'stop':
@@ -257,13 +257,92 @@ class StateManagerNode(Node):
         elif cmd == 'approach_obj':
             self._transition(RobotState.APPROACH_OBJ)
         elif cmd == 'grasp':
-            self._transition(RobotState.GRASP)
+            self._request_grasp('command')
         elif cmd == 'resume':
             # resume from stopped/error to search
             if self._state in (RobotState.STOPPED, RobotState.ERROR, RobotState.IDLE):
                 self._transition(RobotState.SEARCH)
         else:
             self.get_logger().warning(f'Unknown command: {cmd}')
+
+    def _request_grasp(self, source: str):
+        """Gate entry to GRASP so we only accept valid, executable requests.
+
+        Adds debug logging about the selected object and whether the
+        prerequisites passed or failed so Foxglove and logs are more
+        informative during UX-driven testing.
+        """
+        # Quick summary of the currently selected object for debugging
+        try:
+            so_summary = self._selected_object_summary()
+        except Exception:
+            so_summary = 'unavailable'
+        self.get_logger().debug(f'GRASP requested from {source}; selected_object={so_summary}')
+
+        ok = self._validate_grasp_prereqs(source)
+        if not ok:
+            self.get_logger().info(f'GRASP request from {source} rejected by prerequisites; selected_object={so_summary}')
+            return
+        self.get_logger().info(f'GRASP request from {source} accepted — transitioning to GRASP; selected_object={so_summary}')
+        self._transition(RobotState.GRASP)
+
+    def _selected_object_summary(self) -> str:
+        """Return a short, human-friendly summary of `self.selected_object`.
+
+        Defensive: never raise.
+        """
+        if self.selected_object is None:
+            return 'None'
+        try:
+            det_ids = getattr(self.selected_object, 'detection_ids', None) or []
+            first = det_ids[0] if len(det_ids) > 0 else 'N/A'
+            label = getattr(self.selected_object, 'class_name', None) or getattr(self.selected_object, 'label', None) or 'N/A'
+            return f'detection_id={first} label={label}'
+        except Exception:
+            try:
+                return repr(self.selected_object)
+            except Exception:
+                return 'unserializable'
+
+    def _validate_grasp_prereqs(self, source: str) -> bool:
+        """Option A: reject grasp if no selected object or server unavailable."""
+        if self.selected_object is None:
+            self.get_logger().error(
+                f'_validate_grasp_prereqs from {source}: FAILED — selected_object is None'
+            )
+            self._reject_grasp(
+                f'GRASP_REJECTED_NO_OBJECT from {source}: no selected object available'
+            )
+            return False
+        self.get_logger().debug(f'_validate_grasp_prereqs from {source}: selected_object is set')
+        
+        # Check if grasp action server is available
+        server_available = self._grasp_ac.wait_for_server(timeout_sec=5.0)
+        if not server_available:
+            self.get_logger().error(
+                f'_validate_grasp_prereqs from {source}: FAILED — xarm_grasp_action server not available'
+            )
+            self._reject_grasp(
+                f'GRASP_REJECTED_SERVER_UNAVAILABLE from {source}: xarm_grasp_action unavailable'
+            )
+            return False
+        self.get_logger().info(
+            f'_validate_grasp_prereqs from {source}: PASSED — selected_object set and server available'
+        )
+        return True
+
+    def _reject_grasp(self, reason: str):
+        # Publish a descriptive state string so Foxglove can display the
+        # exact rejection reason (helps debugging NO_OBJECT vs SERVER_UNAVAILABLE)
+        try:
+            msg = String()
+            msg.data = reason
+            self._state_pub.publish(msg)
+        except Exception:
+            pass
+        self.get_logger().error(reason)
+        self._stop_pub.publish(Empty())
+        self._transition(RobotState.IDLE)
 
     # ================================================================
     #  State handlers and callbacks
@@ -360,32 +439,59 @@ class StateManagerNode(Node):
         goal.target_type = ApproachObject.Goal.TARGET_TOY
         goal.object_id = 0
         goal.selected_obj = self.selected_object
+        self.get_logger().info(f'_do_approach_obj: sending approach goal with selected_object={self._selected_object_summary()}')
         fut = self._approach_ac.send_goal_async(goal)
+        self.get_logger().info('_do_approach_obj: goal sent, adding accepted callback')
         fut.add_done_callback(self._on_approach_accepted)
 
     def _on_approach_accepted(self, future):
-        goal_handle = future.result()
+        self.get_logger().info('_on_approach_accepted: ENTERED callback')
+        try:
+            goal_handle = future.result()
+            self.get_logger().info(f'_on_approach_accepted: goal_handle result={goal_handle.accepted}')
+        except Exception as e:
+            self.get_logger().error(f'_on_approach_accepted: exception getting goal_handle: {e}')
+            self._transition(RobotState.ERROR)
+            return
         if not goal_handle.accepted:
             self.get_logger().error('Approach goal rejected')
             self._transition(RobotState.ERROR)
             return
+        self.get_logger().info('_on_approach_accepted: goal accepted, registering result callback')
         self._current_goal_handles['approach_obj'] = goal_handle
         goal_handle.get_result_async().add_done_callback(self._on_approach_result)
 
     def _on_approach_result(self, future):
+        self.get_logger().info('_on_approach_result: ENTERED callback')
         try:
             result = future.result().result
+            self.get_logger().info('_on_approach_result: got result object successfully')
         except Exception as e:
             self.get_logger().error(f'Approach result error: {e}')
             self._transition(RobotState.SEARCH)
             return
         self._current_goal_handles.pop('approach_obj', None)
-        if getattr(result, 'proximity_success', False) or getattr(result, 'movement_success', False):
+        # Debug log the raw result fields
+        prox_success = getattr(result, 'proximity_success', False)
+        move_success = getattr(result, 'movement_success', False)
+        move_msg = getattr(result, 'movement_message', '')
+        self.get_logger().info(
+            f'_on_approach_result: proximity_success={prox_success} '
+            f'movement_success={move_success} message="{move_msg}"'
+        )
+        if prox_success or move_success:
             # success: reset retries and continue
             self._approach_retries = 0
-            self.get_logger().info('Approach succeeded — GRASP')
-            self._transition(RobotState.GRASP)
+            self.get_logger().info(
+                f'Approach succeeded (prox={prox_success}, move={move_success}) — '
+                f'calling _request_grasp'
+            )
+            self._request_grasp('approach_success')
         else:
+            self.get_logger().info(
+                f'Approach failed: prox_success={prox_success} move_success={move_success} — '
+                f'will retry or give up'
+            )
             # failed: retry with backoff up to limit
             self._approach_retries += 1
             if self._approach_retries <= self._max_approach_retries:
@@ -403,14 +509,12 @@ class StateManagerNode(Node):
     # ---- GRASP ----
     def _do_grasp(self):
         if self.selected_object is None:
-            self.get_logger().warning('No selected object to grasp — selecting')
-            self._transition(RobotState.SELECT)
+            self._reject_grasp('GRASP_REJECTED_NO_OBJECT in GRASP handler')
             return
         delay = self.get_parameter('sm_delay_grasp').value
         time.sleep(delay)
-        if not self._grasp_ac.wait_for_server(timeout_sec=5.0):
-            self.get_logger().error('Grasp action server not available')
-            self._transition(RobotState.ERROR)
+        if not self._grasp_ac.wait_for_server(timeout_sec=0.0):
+            self._reject_grasp('GRASP_REJECTED_SERVER_UNAVAILABLE in GRASP handler')
             return
         goal = XArm.Goal()
         goal.id = self._extract_selected_object_id(self.selected_object)
@@ -420,7 +524,12 @@ class StateManagerNode(Node):
         fut.add_done_callback(self._on_grasp_accepted)
 
     def _on_grasp_accepted(self, future):
-        goal_handle = future.result()
+        try:
+            goal_handle = future.result()
+        except Exception as e:
+            self.get_logger().error(f'Grasp send_goal failed: {e}')
+            self._reject_grasp('GRASP_REJECTED_SEND_GOAL_EXCEPTION')
+            return
         if not goal_handle.accepted:
             self.get_logger().error('Grasp goal rejected')
             self._transition(RobotState.ERROR)
