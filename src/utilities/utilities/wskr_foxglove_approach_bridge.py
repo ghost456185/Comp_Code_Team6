@@ -149,7 +149,7 @@ class ApproachServiceBridge(Node):
 
         self.declare_parameter('seek_turn_rate_rad_s', 0.30)
         self.declare_parameter('seek_timeout_sec', SEARCH_TIMEOUT_SEC)
-        self.declare_parameter('seek_cmd_rate_hz', 8.0)
+        self.declare_parameter('seek_cmd_rate_hz', 4.0)
         self.declare_parameter('seek_marker_stale_sec', 0.8)
 
         self._seek_turn_rate = float(self.get_parameter('seek_turn_rate_rad_s').value)
@@ -258,14 +258,22 @@ class ApproachServiceBridge(Node):
 
         self._seek_cancel_event.clear()
         deadline = time.monotonic() + max(0.5, self._seek_timeout_sec)
-        rate_hz = max(1.0, self._seek_cmd_rate_hz)
-        sleep_s = 1.0 / rate_hz
+        publish_period = 1.0 / max(1.0, self._seek_cmd_rate_hz)
+        poll_sleep = 0.05
         yaw_rate = self._seek_turn_rate
+        last_publish_t = 0.0
 
         self.get_logger().info(
             f'ArUco seek start id={target_id}, yaw_rate={yaw_rate:.2f} rad/s, '
             f'timeout={self._seek_timeout_sec:.1f}s'
         )
+
+        # Send the turn command once, then keep it alive only as often as the
+        # drive bridge needs to prevent command timeout. Visibility is polled
+        # independently so the service can stop the turn quickly when the tag
+        # appears without spamming identical turn commands.
+        self._publish_seek_cmd(yaw_rate)
+        last_publish_t = time.monotonic()
 
         while time.monotonic() < deadline:
             if self._seek_cancel_event.is_set():
@@ -274,8 +282,13 @@ class ApproachServiceBridge(Node):
             if self._is_aruco_visible(target_id):
                 self._stop_seek_cmd()
                 return True, f'ArUco {target_id} acquired during seek.'
-            self._publish_seek_cmd(yaw_rate)
-            time.sleep(sleep_s)
+
+            now = time.monotonic()
+            if (now - last_publish_t) >= publish_period:
+                self._publish_seek_cmd(yaw_rate)
+                last_publish_t = now
+
+            time.sleep(poll_sleep)
 
         self._stop_seek_cmd()
         return False, f'Timeout seeking ArUco {target_id}.'
