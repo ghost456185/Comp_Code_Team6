@@ -254,6 +254,10 @@ class StateManagerNode(Node):
             self._transition(RobotState.STOPPED)
         elif cmd == 'idle':
             self._transition(RobotState.IDLE)
+        elif cmd == 'approach_obj':
+            self._transition(RobotState.APPROACH_OBJ)
+        elif cmd == 'grasp':
+            self._transition(RobotState.GRASP)
         elif cmd == 'resume':
             # resume from stopped/error to search
             if self._state in (RobotState.STOPPED, RobotState.ERROR, RobotState.IDLE):
@@ -391,9 +395,10 @@ class StateManagerNode(Node):
                 self.get_logger().info(f'Approach failed — retry #{self._approach_retries} in {delay:.1f}s')
                 self._schedule_retry(self._do_approach_obj, delay)
             else:
-                self.get_logger().info('Approach failed — exceeded retries, returning to SEARCH')
+                self.get_logger().info('Approach failed — exceeded retries, issuing stop and returning to IDLE')
                 self._approach_retries = 0
-                self._transition(RobotState.SEARCH)
+                self._stop_pub.publish(Empty())
+                self._transition(RobotState.IDLE)
 
     # ---- GRASP ----
     def _do_grasp(self):
@@ -462,17 +467,18 @@ class StateManagerNode(Node):
             self.get_logger().info('Grasp succeeded — FIND_BOX')
             self._transition(RobotState.FIND_BOX)
         else:
-            # retry grasp with backoff
+            # retry grasp by repositioning: transitioning back to APPROACH_OBJ
             self._grasp_retries += 1
             max_retries = self.get_parameter('sm_max_grasp_retries').value
             if self._grasp_retries <= max_retries:
                 delay = self._grasp_backoff_base * (self._grasp_backoff_multiplier ** (self._grasp_retries - 1))
-                self.get_logger().info(f'Grasp failed — retry #{self._grasp_retries} in {delay:.1f}s')
-                self._schedule_retry(self._do_grasp, delay)
+                self.get_logger().info(f'Grasp failed — retry #{self._grasp_retries} in {delay:.1f}s by re-approaching')
+                self._schedule_retry(lambda: self._transition(RobotState.APPROACH_OBJ), delay)
             else:
-                self.get_logger().info('Grasp failed — exceeded retries, returning to SEARCH')
+                self.get_logger().info('Grasp failed — exceeded retries, issuing stop and returning to IDLE')
                 self._grasp_retries = 0
-                self._transition(RobotState.SEARCH)
+                self._stop_pub.publish(Empty())
+                self._transition(RobotState.IDLE)
 
     # ---- FIND_BOX ----
     def _do_find_box(self):

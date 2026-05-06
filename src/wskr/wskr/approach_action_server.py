@@ -122,7 +122,7 @@ class WSKRApproachActionServer(Node):
         
         # Alignment parameters: stop and center before declaring proximity success
         self.declare_parameter('approach_align_deadband_deg', 5.0)
-        self.declare_parameter('approach_align_kp', 1.0)
+        self.declare_parameter('approach_align_kp', 0.75) # P gain for alignment turn rate
         self.declare_parameter('approach_align_rate_hz', 10.0)
         self.declare_parameter('approach_align_timeout_s', 3.0)
         self.declare_parameter('approach_align_max_rate_rad_s', 0.5)
