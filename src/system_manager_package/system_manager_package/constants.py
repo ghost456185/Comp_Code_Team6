@@ -230,7 +230,8 @@ GRASP_GOAL_ACCEPTANCE_TIMEOUT_S = 5.0            # timeout waiting for goal acce
 GA_LINK_1_MM = 102.0                            # shoulder-to-elbow link length
 GA_LINK_2_MM = 98.0                             # elbow-to-wrist link length
 GA_LINK_3_MM = 155.0                            # wrist-to-hand link length
-GA_Z_GLOBAL_OFFSET_MM = 190.0                   # Z origin offset from joint1 frame to ground (mm)
+GA_Z_GLOBAL_OFFSET_MM = 170.0                   # Z origin offset from joint1 frame to ground (mm)
+X_MM_OFFSET = 100.0                             # X origin offset
 GA_INITIAL_POS = [-14.25, 76.75, 0.0]           # home joint angles [j1, j2, j3] (degrees)
 
 # Joint limits (degrees)

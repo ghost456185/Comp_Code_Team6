@@ -5,6 +5,10 @@ from rclpy.node import Node
 
 from robot_interfaces.srv import BboxToXYZ
 
+from system_manager_package.constants import (
+    X_MM_OFFSET,
+)
+
 
 class BboxToXYZServiceNode(Node):
     def __init__(self):
@@ -45,7 +49,7 @@ class BboxToXYZServiceNode(Node):
         )
 
         response.success = True
-        response.x_mm = float(x_mm)
+        response.x_mm = float(x_mm) + X_MM_OFFSET
         response.y_mm = 0.0
         response.z_mm = 0.0
 
