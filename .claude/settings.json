@@ -10,7 +10,8 @@
       "Bash(python dot_to_drawio.py architecture.json architecture.drawio)",
       "Bash(\"/c/Program Files/Graphviz/bin/dot\" -Tpng architecture.dot -o architecture.png)",
       "Bash(\"/c/Program Files/Graphviz/bin/dot\" -Tsvg architecture.dot -o architecture.svg)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('src/xarm_object_collector_package/src/Object_collector_action_server.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK: parses'\\)\")"
     ]
   }
 }

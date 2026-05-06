@@ -5,6 +5,7 @@ All hardware access goes through ROS services / actions on
 xarm_hardware_node; this node only composes the grasp pipeline stages.
 Nothing in here imports XARMController directly.
 """
+import math
 import time
 
 import numpy as np
@@ -16,8 +17,9 @@ from rclpy.node import Node
 
 from robot_interfaces.action import PlayWaypointsDense, XArm  # type: ignore
 from robot_interfaces.srv import (  # type: ignore
+    BboxToXYZ,
+    DetectObjectsV2,
     GetEndEffectorCount,
-    GetObjProperties,
     MoveEndEffectorCount,
     MoveJoint,
     QLearning,
@@ -39,6 +41,7 @@ from system_manager_package.constants import (
     GRIPPER_CLOSE_COUNT,
     GRIPPER_OPEN_COUNT,
     GRIPPER_SETTLE_SEC,
+    YOLO_SIGNED_AR_ROTATION_DEG,
 )
 
 MidCarry = np.array(ARM_MID_CARRY)
@@ -82,8 +85,24 @@ class GraspActionNode(Node):
         )
 
         # ---- Perception / policy clients ----
-        self.obj_props_client = self.create_client(
-            GetObjProperties, 'get_obj_properties_service', callback_group=cb_group,
+        # ====================================================================
+        # !!! MODIFIED: BYPASSING GetObjProperties FOR THE GRASP STAGE !!!
+        # --------------------------------------------------------------------
+        # The streaming track_id sent through the foxglove panel is NOT a
+        # zero-based index into a fresh DetectObjectsV2 inference, so the old
+        # `self.obj_props_client = create_client(GetObjProperties, ...)` was
+        # always failing at Stage 1 with "Detection index N out of range".
+        #
+        # Instead we now drive DetectObjectsV2 + BboxToXYZ ourselves and
+        # identify the target by class_name (taken from goal.selected_obj).
+        # GetObjProperties is left untouched in process_object_vision.py for
+        # any legacy index-based callers that may exist outside this tree.
+        # ====================================================================
+        self.detect_objects_client = self.create_client(
+            DetectObjectsV2, 'detect_objects_service_v2', callback_group=cb_group,
+        )
+        self.bbox_xyz_client = self.create_client(
+            BboxToXYZ, 'bbox_to_xyz_service', callback_group=cb_group,
         )
         self.q_learning_client = self.create_client(
             QLearning, 'analyze_table', callback_group=cb_group,
@@ -228,6 +247,86 @@ class GraspActionNode(Node):
             return False
         return bool(play_result.success)
 
+    # ================= PERCEPTION HELPERS =================
+    # ========================================================================
+    # !!! ADDED: CLASS-BASED + ROTATED-MATCH DETECTION PICKERS !!!
+    # ------------------------------------------------------------------------
+    # These mirror process_object_vision.py's `extract_detection_by_index` /
+    # `match_rotated_detection` but pick by class_name (not array index), so
+    # the streaming track_id mismatch can no longer break Stage 1.
+    # ========================================================================
+
+    @staticmethod
+    def _detection_count(detections_msg):
+        return min(
+            len(detections_msg.x),
+            len(detections_msg.y),
+            len(detections_msg.width),
+            len(detections_msg.height),
+            len(detections_msg.class_name),
+            len(detections_msg.confidence),
+        )
+
+    @staticmethod
+    def _detection_at(detections_msg, idx):
+        return {
+            'index': int(idx),
+            'class_name': detections_msg.class_name[idx],
+            'x': float(detections_msg.x[idx]),
+            'y': float(detections_msg.y[idx]),
+            'width': float(detections_msg.width[idx]),
+            'height': float(detections_msg.height[idx]),
+        }
+
+    def _pick_detection_by_class(self, detections_msg, target_class):
+        """Pick the detection whose class_name == target_class with the
+        largest area; if no class match (or target_class is empty), fall
+        back to the largest detection regardless of class. Returns None
+        when there are no detections at all."""
+        count = self._detection_count(detections_msg)
+        if count == 0:
+            return None
+        candidates = [self._detection_at(detections_msg, i) for i in range(count)]
+        if target_class:
+            class_match = [d for d in candidates if d['class_name'] == target_class]
+            if class_match:
+                return max(class_match, key=lambda d: d['width'] * d['height'])
+        return max(candidates, key=lambda d: d['width'] * d['height'])
+
+    def _match_rotated_detection(
+        self, detections_msg, base_det, rotation_degrees_text,
+        image_width, image_height,
+    ):
+        """Find the post-rotation detection of the same class closest to
+        where `base_det`'s center would have rotated to (about the image
+        center). Mirrors process_object_vision.match_rotated_detection but
+        without the index dependency. Returns None on bad inputs."""
+        count = self._detection_count(detections_msg)
+        if count == 0:
+            return None
+        try:
+            rotation_degrees = float(rotation_degrees_text)
+        except ValueError:
+            return None
+
+        cx = float(image_width) / 2.0
+        cy = float(image_height) / 2.0
+        theta = math.radians(rotation_degrees)
+        sx = float(base_det['x']) - cx
+        sy = float(base_det['y']) - cy
+        predicted_x = (sx * math.cos(theta)) - (sy * math.sin(theta)) + cx
+        predicted_y = (sx * math.sin(theta)) + (sy * math.cos(theta)) + cy
+
+        candidates = [self._detection_at(detections_msg, i) for i in range(count)]
+        class_match = [
+            d for d in candidates if d['class_name'] == base_det['class_name']
+        ]
+        pool = class_match or candidates
+        return min(
+            pool,
+            key=lambda d: math.hypot(d['x'] - predicted_x, d['y'] - predicted_y),
+        )
+
     # ================= MAIN ACTION =================
 
     def execute_callback(self, goal_handle):
@@ -250,24 +349,118 @@ class GraspActionNode(Node):
             goal_handle.canceled()
             return self._make_result(0)
 
-        # ---- STAGE 1: Estimate object properties ----
+        # ====================================================================
+        # !!! REWRITTEN STAGE 1: CLASS-BASED DETECTION PICK !!!
+        # --------------------------------------------------------------------
+        # Old Stage 1 called GetObjProperties with `obj_id` (the streaming
+        # ByteTrack track_id from the foxglove panel). GetObjProperties
+        # interprets that field as a zero-based index into its own fresh
+        # DetectObjectsV2 inference, so this nearly always raised
+        # "Detection index N out of range" and Stage 1 silently aborted.
+        #
+        # New flow:
+        #   1) Run a base DetectObjectsV2 inference ourselves.
+        #   2) Pick the detection whose class_name matches the original
+        #      selection (goal.selected_obj.class_name[0]); largest area
+        #      tiebreaks. If no class match exists, fall back to the
+        #      largest detection in frame.
+        #   3) Run a rotated DetectObjectsV2 inference (15° per
+        #      YOLO_SIGNED_AR_ROTATION_DEG) and find the same-class detection
+        #      closest to where the base would have rotated to. Use it to
+        #      derive the SIGNED aspect ratio that the Q-learning wrist
+        #      policy expects (preserves Stage 2 behavior). If the rotated
+        #      inference fails or returns nothing, we fall back to the
+        #      unsigned AR — the wrist might pick a non-optimal direction
+        #      but the grasp can still proceed.
+        #   4) Call BboxToXYZ on the picked base bbox to get arm-frame mm.
+        # ====================================================================
         self._publish_feedback(goal_handle, "stage_1_get_obj_properties", 0.05)
-        obj_req = GetObjProperties.Request()
-        obj_req.id = int(obj_id)
-        obj_props = self._call_service(
-            self.obj_props_client, obj_req, "GetObjProperties",
-            timeout_sec=20.0, goal_handle=goal_handle,
+
+        target_class = ''
+        sel = request.selected_obj
+        if getattr(sel, 'class_name', None) and len(sel.class_name) > 0:
+            target_class = str(sel.class_name[0])
+
+        det_req = DetectObjectsV2.Request()
+        det_req.id = 0
+        det_req.rotation_degrees = ''
+        base_resp = self._call_service(
+            self.detect_objects_client, det_req, "DetectObjectsV2(base)",
+            timeout_sec=10.0, goal_handle=goal_handle,
         )
-        if obj_props is None or not obj_props.success:
-            self.get_logger().error("Stage 1 failed: GetObjProperties")
+        if base_resp is None or not base_resp.success:
+            self.get_logger().error("Stage 1 failed: DetectObjectsV2(base)")
             goal_handle.canceled() if goal_handle.is_cancel_requested else goal_handle.abort()
             return self._make_result(0)
+
+        base_det = self._pick_detection_by_class(base_resp.detections, target_class)
+        if base_det is None:
+            self.get_logger().error(
+                f"Stage 1 failed: no detections in fresh inference (target_class={target_class!r})"
+            )
+            goal_handle.abort()
+            return self._make_result(0)
+        self.get_logger().info(
+            f"Stage 1 picked detection idx={base_det['index']} class={base_det['class_name']!r} "
+            f"area={base_det['width'] * base_det['height']:.0f} (target_class={target_class!r})"
+        )
+
+        rot_text = str(YOLO_SIGNED_AR_ROTATION_DEG)
+        det_req_rot = DetectObjectsV2.Request()
+        det_req_rot.id = 0
+        det_req_rot.rotation_degrees = rot_text
+        rot_resp = self._call_service(
+            self.detect_objects_client, det_req_rot, "DetectObjectsV2(rotated)",
+            timeout_sec=10.0, goal_handle=goal_handle,
+        )
+        rotated_det = None
+        if rot_resp is not None and rot_resp.success:
+            rotated_det = self._match_rotated_detection(
+                rot_resp.detections, base_det, rot_text,
+                base_resp.detections.image_width,
+                base_resp.detections.image_height,
+            )
+
+        raw_ar = float(base_det['width']) / max(float(base_det['height']), 1e-6)
+        if rotated_det is not None:
+            rotated_ar = (
+                float(rotated_det['width']) / max(float(rotated_det['height']), 1e-6)
+            )
+            signed_ar = abs(raw_ar) if (rotated_ar - raw_ar) >= 0.0 else -abs(raw_ar)
+        else:
+            self.get_logger().warn(
+                "Rotated inference unavailable; using unsigned aspect ratio for wrist policy."
+            )
+            signed_ar = abs(raw_ar)
+
+        xyz_req = BboxToXYZ.Request()
+        xyz_req.bbox_x = float(base_det['x'])
+        xyz_req.bbox_y = float(base_det['y'])
+        xyz_req.bbox_width = float(base_det['width'])
+        xyz_req.bbox_height = float(base_det['height'])
+        xyz_req.image_width = int(base_resp.detections.image_width)
+        xyz_req.image_height = int(base_resp.detections.image_height)
+        xyz_resp = self._call_service(
+            self.bbox_xyz_client, xyz_req, "BboxToXYZ",
+            timeout_sec=5.0, goal_handle=goal_handle,
+        )
+        if xyz_resp is None or not xyz_resp.success:
+            self.get_logger().error("Stage 1 failed: BboxToXYZ")
+            goal_handle.canceled() if goal_handle.is_cancel_requested else goal_handle.abort()
+            return self._make_result(0)
+
+        x_mm = float(xyz_resp.x_mm)
+        y_mm = float(xyz_resp.y_mm)
+        z_mm = float(xyz_resp.z_mm)
+        # ====================================================================
+        # !!! END REWRITTEN STAGE 1 !!!
+        # ====================================================================
 
         # ---- STAGE 2: Q-learning wrist policy ----
         self._publish_feedback(goal_handle, "stage_2_wrist_policy", 0.15)
         wrist_req = QLearning.Request()
         wrist_req.id = int(obj_id)
-        wrist_req.aspect_ratio = float(obj_props.signed_aspect_ratio)
+        wrist_req.aspect_ratio = float(signed_ar)
         wrist_req.attempt_number = 0
         wrist_resp = self._call_service(
             self.q_learning_client, wrist_req, "QLearning",
@@ -279,9 +472,7 @@ class GraspActionNode(Node):
             return self._make_result(0)
         wrist_angle = float(wrist_resp.wrist_angle)
 
-        goal_xyz = np.array(
-            [float(obj_props.x_mm), float(obj_props.y_mm), float(obj_props.z_mm)]
-        )
+        goal_xyz = np.array([x_mm, y_mm, z_mm])
 
         # ---- STAGE 3: Plan trajectory with GeneAlgo ----
         self._publish_feedback(goal_handle, "stage_3_ga_planning", 0.35)

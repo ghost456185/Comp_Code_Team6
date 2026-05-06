@@ -322,6 +322,36 @@ class ApproachServiceBridge(Node):
         request: ApproachObjectSrv.Request,
         response: ApproachObjectSrv.Response,
     ) -> ApproachObjectSrv.Response:
+        # ====================================================================
+        # !!! MODIFIED: TOY APPROACH NOW AUTO-CHAINS INTO A GRASP !!!
+        # --------------------------------------------------------------------
+        # Foxglove "Approach Toy" panel still calls /WSKR/approach_object_start
+        # (no panel rebuild needed). When the request looks like a TOY (i.e.
+        # selected_obj.class_name is populated by the YOLO selection flow),
+        # we delegate to _on_approach_then_grasp so the service blocks until
+        # both the approach action AND the xarm_grasp_action complete.
+        #
+        # BOX/ArUco approaches keep the original fire-and-return behavior
+        # (seek-spin + dispatch + return) below — no grasp chain there.
+        #
+        # Cancel via /WSKR/approach_object_cancel still cancels the approach
+        # action handle. Once the approach phase finishes and the grasp phase
+        # is running, that handle is cleared and cancel becomes a no-op (by
+        # design — see chat 2026-05-06).
+        # ====================================================================
+        sel = request.selected_obj
+        is_toy = bool(
+            getattr(sel, 'class_name', None)
+            and len(sel.class_name) > 0
+            and sel.class_name[0]
+        )
+
+        if is_toy:
+            return self._on_approach_then_grasp(request, response)
+
+        # BOX/ArUco path: seek-spin to acquire the marker, then dispatch the
+        # approach action and return immediately (no grasp follow-up — the
+        # gripper has nothing to do at the dropbox).
         if not self._approach.wait_for_server():
             response.movement_success = False
             response.proximity_success = False
@@ -333,27 +363,18 @@ class ApproachServiceBridge(Node):
             return response
 
         goal = ApproachObjectAction.Goal()
-        # TARGET_TOY when the dashboard filled in a selected_obj with a
-        # class name (ImgDetectionData-driven flow); otherwise BOX + ArUco id.
-        sel = request.selected_obj
-        if getattr(sel, 'class_name', None) and len(sel.class_name) > 0 and sel.class_name[0]:
-            goal.target_type = ApproachObjectAction.Goal.TARGET_TOY
-        else:
-            goal.target_type = ApproachObjectAction.Goal.TARGET_BOX
+        goal.target_type = ApproachObjectAction.Goal.TARGET_BOX
         goal.object_id = int(request.id)
         goal.selected_obj = sel if sel is not None else ImgDetectionData()
 
-        # For ArUco/BOX goals: actively seek by slow one-direction turning
-        # until the requested marker is visible, then hand off to approach.
-        if goal.target_type == ApproachObjectAction.Goal.TARGET_BOX:
-            ok, seek_msg = self._seek_for_aruco(goal.object_id)
-            if not ok:
-                response.movement_success = False
-                response.proximity_success = False
-                response.movement_message = seek_msg
-                self.get_logger().warn(seek_msg)
-                return response
-            self.get_logger().info(seek_msg)
+        ok, seek_msg = self._seek_for_aruco(goal.object_id)
+        if not ok:
+            response.movement_success = False
+            response.proximity_success = False
+            response.movement_message = seek_msg
+            self.get_logger().warn(seek_msg)
+            return response
+        self.get_logger().info(seek_msg)
 
         err = self._approach.send(goal)
         if err is not None:
@@ -366,7 +387,7 @@ class ApproachServiceBridge(Node):
         response.movement_success = True
         response.proximity_success = False
         response.movement_message = (
-            f'Approach dispatched (target_type={goal.target_type}, id={goal.object_id}). '
+            f'Approach dispatched (BOX, id={goal.object_id}). '
             'Monitor feedback via WSKR/tracking_mode and WSKR/cmd_vel.'
         )
         return response
@@ -406,6 +427,34 @@ class ApproachServiceBridge(Node):
         request: ApproachObjectSrv.Request,
         response: ApproachObjectSrv.Response,
     ) -> ApproachObjectSrv.Response:
+        # ====================================================================
+        # !!! ADDED: TOY-ONLY GUARD !!!
+        # --------------------------------------------------------------------
+        # This callback is reached two ways:
+        #   1) Direct call to /approach_then_grasp (kept as a registered
+        #      service for any external caller).
+        #   2) Delegation from _on_approach_start when the request is a TOY.
+        # Either way, chaining a grasp onto a BOX/ArUco approach is wrong —
+        # the gripper would close on the dropbox. Reject early if the request
+        # looks like a BOX (no class_name in selected_obj).
+        # ====================================================================
+        sel = request.selected_obj
+        is_toy = bool(
+            getattr(sel, 'class_name', None)
+            and len(sel.class_name) > 0
+            and sel.class_name[0]
+        )
+        if not is_toy:
+            response.movement_success = False
+            response.proximity_success = False
+            response.movement_message = (
+                'approach_then_grasp is toy-only; selected_obj.class_name was '
+                'empty (BOX/ArUco target inferred). Use approach_object_start '
+                'for ArUco approaches.'
+            )
+            self.get_logger().warn(response.movement_message)
+            return response
+
         if not self._approach.wait_for_server():
             response.movement_success = False
             response.proximity_success = False
