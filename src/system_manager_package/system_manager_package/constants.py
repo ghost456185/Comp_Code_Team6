@@ -163,7 +163,7 @@ SELECTION_CLASS_PRIORITIES = [                  # class ranking: lower index = h
     'pyramid', # -5 Points per shape (comment out for friday challenge)
 
 ]
-SELECTION_MIN_CONFIDENCE = 0.2                  # discard detections below this confidence
+SELECTION_MIN_CONFIDENCE = 0.7                 # discard detections below this confidence
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  SEARCH BEHAVIOR  (wander + detect action server)                ║
@@ -213,8 +213,8 @@ GRIPPER_CLOSE_COUNT = 687.0                     # servo count for fully closed g
 GRIPPER_BLOCK_TOLERANCE = 100.0                 # count gap that indicates object is grasped
 GRIPPER_SETTLE_SEC = 2.0                        # wait time after gripper motion (s)
 
-ARM_MID_CARRY = [0.0, -14.25, 76.75, 0.0, 0.0] # home/carry joint angles (degrees)
-ARM_MID_CARRY_DURATION_MS = 1000                # interpolation time for mid-carry move (ms)
+ARM_MID_CARRY = [0.0, -14.25, 76.75, 0.0, 0.0]  # home/carry joint angles (degrees)
+ARM_MID_CARRY_DURATION_MS = 1000                 # interpolation time for mid-carry move (ms)
 ARM_SETTLE_SEC = 1.0                            # wait time after arm motion (s)
 ARM_SERVO_IDS = [6, 5, 4, 3, 2]                 # physical servo IDs (full arm, base to gripper)
 ARM_TRAJ_SERVO_IDS = [6, 5, 4, 3]               # servo IDs used by GA trajectory (no gripper)
@@ -275,3 +275,9 @@ FOXGLOVE_BIND_ADDRESS = '0.0.0.0'               # bind address (all interfaces)
 FOXGLOVE_SEND_BUFFER_LIMIT = 2_000_000          # max DDS fanout buffer (bytes)
 FOXGLOVE_CAMERA_THROTTLE_HZ = 2.0               # camera image throttle rate (Hz)
 FOXGLOVE_OVERLAY_THROTTLE_HZ = 5.0              # WSKR overlay throttle rate (Hz)
+
+
+# Failed Testing to try and flip other robots:
+
+# ros2 service call /xarm/set_joint_state robot_interfaces/srv/SetJointState "{angles: [0, 5, 70, 70, -90, 0], servo_ids: [1,2,3,4,5,6], duration_vector: [1000.0, 1000.0,1000.0,1000.0,1000.0,1000.0], radians: false}"
+# ros2 service call /xarm/set_joint_state robot_interfaces/srv/SetJointState "{angles: [0, 5, 0, 0, 0, 0], servo_ids: [1,2,3,4,5,6], duration_vector: [100.0, 100.0,100.0,100.0,100.0,100.0], radians: false}"
