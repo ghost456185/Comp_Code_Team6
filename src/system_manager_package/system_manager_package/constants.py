@@ -151,6 +151,11 @@ YOLO_ROTATION_TIMEOUT_SEC = 15.0                # timeout for rotated-inference 
 YOLO_BBOX_TIMEOUT_SEC = 5.0                     # timeout for bbox-to-XYZ service calls (s)
 YOLO_SIGNED_AR_ROTATION_DEG = '15'              # rotation angle for signed aspect-ratio estimation
 
+# How many consecutive frames of the same selected object/shape are required
+# before the detection is considered stable. Used for debouncing noisy vision
+# classifications so downstream state transitions don't flicker.
+VISION_DEBOUNCE_FRAMES = 3
+
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  OBJECT SELECTION  (picks best detection from YOLO frame)        ║
 # ╚══════════════════════════════════════════════════════════════════╝

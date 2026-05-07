@@ -23,6 +23,7 @@ from robot_interfaces.srv import SelectObject
 from system_manager_package.constants import (
     SELECTION_CLASS_PRIORITIES,
     SELECTION_MIN_CONFIDENCE,
+    VISION_DEBOUNCE_FRAMES,
 )
 
 
@@ -42,13 +43,19 @@ class ObjectSelection(Node):
             list(SELECTION_CLASS_PRIORITIES),
         )
         self.declare_parameter('min_confidence', SELECTION_MIN_CONFIDENCE)
+        self.declare_parameter('debounce_frames', VISION_DEBOUNCE_FRAMES)
 
         self.class_priorities = [
             str(c) for c in self.get_parameter('class_priorities').value
         ]
         self.min_confidence = float(self.get_parameter('min_confidence').value)
+        self.debounce_frames = int(self.get_parameter('debounce_frames').value)
 
         self._latest_detections: Optional[ImgDetectionData] = None
+        # Debounce state: track candidate class and counts to avoid flicker
+        self._candidate_class: Optional[str] = None
+        self._stable_count: int = 0
+        self._last_stable_selected: Optional[ImgDetectionData] = None
 
         self.srv = self.create_service(
             SelectObject, 'select_object_service', self._handle_select_service,
@@ -156,9 +163,41 @@ class ObjectSelection(Node):
             empty = ImgDetectionData()
             empty.image_width = msg.image_width
             empty.image_height = msg.image_height
+            # No candidate this frame: reset candidate state and publish empty
+            self._candidate_class = None
+            self._stable_count = 0
+            self._last_stable_selected = None
             self.selected_pub.publish(empty)
             return
-        self.selected_pub.publish(self._extract_single(msg, idx))
+        # Candidate detected — perform debounce by class name to avoid
+        # rapid class-switching from noisy detections.
+        cls = (
+            str(msg.class_name[idx])
+            if idx < len(msg.class_name)
+            else ''
+        )
+
+        if self._candidate_class == cls:
+            self._stable_count += 1
+        else:
+            self._candidate_class = cls
+            self._stable_count = 1
+
+        if self._stable_count >= max(1, self.debounce_frames):
+            # Candidate is stable — publish the fresh selection and cache it
+            selected = self._extract_single(msg, idx)
+            self._last_stable_selected = selected
+            self.selected_pub.publish(selected)
+        else:
+            # Not stable yet — publish the last stable selection if present,
+            # otherwise publish an empty placeholder so downstreams don't flip.
+            if self._last_stable_selected is not None:
+                self.selected_pub.publish(self._last_stable_selected)
+            else:
+                empty = ImgDetectionData()
+                empty.image_width = msg.image_width
+                empty.image_height = msg.image_height
+                self.selected_pub.publish(empty)
 
     # ------------------------------------------------------------- service
 

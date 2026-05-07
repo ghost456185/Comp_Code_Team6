@@ -136,7 +136,9 @@ from system_manager_package.constants import (
     SM_MAX_GRASP_RETRIES,
     SM_BOX_ARUCO_ID,
     SEARCH_TIMEOUT_SEC,
+    VISION_DEBOUNCE_FRAMES,
 )
+from robot_interfaces.msg import ImgDetectionData
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +197,10 @@ class StateManagerNode(Node):
         self.declare_parameter('sm_max_grasp_retries', SM_MAX_GRASP_RETRIES)
         self.declare_parameter('sm_box_aruco_id', SM_BOX_ARUCO_ID)
         self.declare_parameter('search_timeout_sec', SEARCH_TIMEOUT_SEC)
+        # Vision debounce: number of consecutive frames required to accept
+        # a new selected object (and conversely the number of frames of
+        # empty selection required before clearing it).
+        self.declare_parameter('vision_debounce_frames', VISION_DEBOUNCE_FRAMES)
 
         # retry / backoff parameters
         self._approach_retries = 0
@@ -204,6 +210,14 @@ class StateManagerNode(Node):
         self._approach_backoff_multiplier = 2.0
         self._grasp_backoff_base = 1.5
         self._grasp_backoff_multiplier = 2.0
+
+        # Vision streaming debounce state
+        self._vision_debounce_frames = int(self.get_parameter('vision_debounce_frames').value)
+        self._vision_candidate_class = None
+        self._vision_stable_count = 0
+        self._vision_loss_count = 0
+        self._vision_last_stable_selected = None
+        self.create_subscription(ImgDetectionData, 'vision/selected_object', self._on_selected_object, 10)
 
         self.get_logger().info(
             'State manager ready in IDLE. Publish to /robot_command to begin.'
@@ -330,6 +344,69 @@ class StateManagerNode(Node):
             f'_validate_grasp_prereqs from {source}: PASSED — selected_object set and server available'
         )
         return True
+
+    # -------------------------------------------------------------
+    # Vision-selected-object subscriber + debounce
+    # -------------------------------------------------------------
+    def _on_selected_object(self, msg: ImgDetectionData) -> None:
+        """Receive the streaming `vision/selected_object` and update
+        `self.selected_object` only after the selection is stable for
+        `_vision_debounce_frames` consecutive callbacks. Protect changes
+        with the FSM lock.
+        """
+        # Determine if this message contains a valid selection
+        try:
+            has_det = len(msg.x) > 0
+        except Exception:
+            has_det = False
+
+        # Extract class label if present
+        cls = None
+        if has_det:
+            try:
+                cls = str(msg.class_name[0]) if len(msg.class_name) > 0 else None
+            except Exception:
+                cls = None
+
+        with self._lock:
+            if not has_det:
+                # No detection in this frame: increment loss counter
+                self._vision_loss_count += 1
+                self._vision_stable_count = 0
+                self._vision_candidate_class = None
+                # Only clear selected_object after sustained loss
+                if self._vision_loss_count >= max(1, self._vision_debounce_frames):
+                    if self.selected_object is not None:
+                        self.get_logger().info('Vision selection lost (stale) — holding previous state until stable')
+                    self.selected_object = None
+                # otherwise keep last stable selection
+                return
+
+            # There is a detection in this frame — reset loss counter
+            self._vision_loss_count = 0
+
+            if self._vision_candidate_class == cls:
+                self._vision_stable_count += 1
+            else:
+                self._vision_candidate_class = cls
+                self._vision_stable_count = 1
+
+            if self._vision_stable_count >= max(1, self._vision_debounce_frames):
+                # Accept new stable selection
+                self._vision_last_stable_selected = msg
+                # Update the FSM's selected_object only if it changed
+                prev_label = None
+                try:
+                    prev_label = self.selected_object.class_name[0] if self.selected_object is not None and len(self.selected_object.class_name) > 0 else None
+                except Exception:
+                    prev_label = None
+                if prev_label != cls:
+                    self.get_logger().info(f'Vision selection stabilized on "{cls}" (frames={self._vision_stable_count})')
+                self.selected_object = msg
+            else:
+                # Not stable yet: do not overwrite the last stable selection
+                # (keeps FSM from flickering between choices).
+                pass
 
     def _reject_grasp(self, reason: str):
         # Publish a descriptive state string so Foxglove can display the
