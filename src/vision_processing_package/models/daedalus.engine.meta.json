@@ -1,0 +1,23 @@
+{
+  "exported_at_utc": "2026-05-07T18:26:04.655668+00:00",
+  "files": {
+    "pt": "/home/me-cas-jetson04/Comp_Code_Team6/src/vision_processing_package/models/daedalus.pt",
+    "engine": "/home/me-cas-jetson04/Comp_Code_Team6/src/vision_processing_package/models/daedalus.engine"
+  },
+  "export": {
+    "format": "engine",
+    "device": 0,
+    "half": true
+  },
+  "software": {
+    "torch": "2.8.0",
+    "ultralytics": "8.3.168",
+    "tensorrt": "10.3.0"
+  },
+  "gpu": {
+    "index": 0,
+    "name": "Orin",
+    "capability": "8.7",
+    "total_memory_bytes": 7989997568
+  }
+}

@@ -9,7 +9,7 @@ from ultralytics import YOLO
 
 
 MODEL_PT_PATH = Path(
-	'/home/me-cas-jetson04/Comp_Code_Team6/src/vision_processing_package/models/weights.pt'
+	'/home/me-cas-jetson04/Comp_Code_Team6/src/vision_processing_package/models/daedalus.pt'
 )
 EXPORT_DEVICE = 0
 
