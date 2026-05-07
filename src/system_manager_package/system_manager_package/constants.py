@@ -122,13 +122,14 @@ AUTOPILOT_PROXIMITY_SPEED_MIN = 0.1             # drive speed scale floor at min
 # ╚══════════════════════════════════════════════════════════════════╝
 
 APPROACH_TIMEOUT_SEC = 999.0                    # hard timeout for a single approach goal (s)
-APPROACH_PROXIMITY_SUCCESS_MM = 150.0          # target-whisker distance for goal success (mm)
+APPROACH_PROXIMITY_SUCCESS_MM = 75.0            # target-whisker distance for goal success (mm)
 APPROACH_TARGET_LOST_TIMEOUT_SEC = 7.0          # abort after this long without reacquiring target (s)
 APPROACH_REACQUIRE_THRESHOLD = 0.55             # template-match NCC threshold for re-acquisition
 APPROACH_REACQUIRE_FAILURE_DEG = 30.0           # heading cone inside which reacquire-abort fires (deg)
 APPROACH_REACQUIRE_FAILURE_FRAMES = 10          # consecutive frameless ticks before reacquire-abort
 APPROACH_ARUCO_DETECT_SCALE = 1.0               # extra downsample before ArUco detection (1.0 = none)
 APPROACH_SLOW_FRAME_WARN_MS = 150.0             # log warning when image_callback exceeds this (ms)
+APPROACH_ALIGNMENT_Kp = 0.5                    # P gain for alignment turn rate
 
 # YOLO/CSRT fusion (TOY targets only)
 APPROACH_YOLO_GAP_ABORT_SEC = 5.0               # max coast time on CSRT without a same-class YOLO match (s)

@@ -70,6 +70,7 @@ from system_manager_package.constants import (
     APPROACH_TRACK_IOU_HANDOFF,
     APPROACH_YOLO_GAP_ABORT_SEC,
     APPROACH_YOLO_STALENESS_WARN_SEC,
+    APPROACH_ALIGNMENT_Kp,
 )
 
 
@@ -122,7 +123,7 @@ class WSKRApproachActionServer(Node):
         
         # Alignment parameters: stop and center before declaring proximity success
         self.declare_parameter('approach_align_deadband_deg', 5.0)
-        self.declare_parameter('approach_align_kp', 0.4) # P gain for alignment turn rate
+        self.declare_parameter('approach_align_kp', APPROACH_ALIGNMENT_Kp) # P gain for alignment turn rate
         self.declare_parameter('approach_align_rate_hz', 10.0)
         self.declare_parameter('approach_align_timeout_s', 30.0)
         self.declare_parameter('approach_align_max_rate_rad_s', 0.2)
@@ -437,6 +438,75 @@ class WSKRApproachActionServer(Node):
 
     def _publish_target_info_inactive(self) -> None:
         self._publish_target_info('', -1, 0, False)
+
+    def _current_target_proximity_mm(self) -> Optional[float]:
+        if self.latest_target_whiskers is None or len(self.latest_target_whiskers) == 0:
+            return None
+        try:
+            value = float(np.min(self.latest_target_whiskers))
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(value):
+            return None
+        return value
+
+    def _align_to_zero_heading(
+        self,
+        goal_handle,
+        result: ApproachObject.Result,
+        closest_mm: Optional[float],
+        cancel_message: str,
+    ) -> None:
+        self._publish_autopilot_enable(False)
+        self.stop_pub.publish(Empty())
+
+        align_start = time.time()
+        aligned = False
+        period = 1.0 / max(1.0, self._align_rate_hz)
+        while rclpy.ok() and (time.time() - align_start) < self._align_timeout_s:
+            if goal_handle.is_cancel_requested:
+                result.movement_success = False
+                result.movement_message = cancel_message
+                goal_handle.canceled()
+                break
+
+            with self.lock:
+                heading_deg = float(self.last_heading_deg)
+
+            if abs(heading_deg) <= self._align_deadband_deg:
+                self.stop_pub.publish(Empty())
+                aligned = True
+                break
+
+            error_rad = math.radians(heading_deg)
+            yaw_cmd = max(-self._align_max_rate_rad_s, min(self._align_max_rate_rad_s, self._align_kp * error_rad))
+            tw = Twist()
+            tw.angular.z = float(yaw_cmd)
+            self.cmd_pub.publish(tw)
+
+            time.sleep(period)
+
+        self.cmd_pub.publish(Twist())
+
+        if aligned:
+            result.proximity_success = True
+            if closest_mm is not None:
+                result.movement_message = (
+                    f'Target bbox within {closest_mm:.0f} mm (threshold {self.proximity_success_mm:.0f} mm)'
+                )
+            else:
+                result.movement_message = 'Target aligned within deadband'
+            self.get_logger().info(
+                f'Approach alignment succeeded: {result.movement_message} '
+                f'movement_success={result.movement_success} proximity_success={result.proximity_success}'
+            )
+            goal_handle.succeed()
+        elif not goal_handle.is_cancel_requested:
+            result.proximity_success = False
+            result.movement_success = False
+            result.movement_message = f'Alignment failed or timed out after {self._align_timeout_s:.1f}s'
+            self.get_logger().warn(result.movement_message)
+            goal_handle.abort()
 
     def _compute_and_publish_heading(self, u_norm: float, v_norm: float) -> None:
         """Synchronous heading computation via the in-process lens model.
@@ -937,6 +1007,48 @@ class WSKRApproachActionServer(Node):
                 f'Fusion init: track_id={self.goal_track_id} class={self.goal_class_name}'
             )
 
+        # For toy goals, avoid enabling the autopilot until we know the
+        # target whisker distance is safely above the success threshold.
+        # If it is already at/below threshold, skip the drive phase and go
+        # directly into zero-heading alignment.
+        if self.goal_target_type == ApproachObject.Goal.TARGET_TOY:
+            target_proximity_mm = self._current_target_proximity_mm()
+            precheck_start = time.time()
+            while (
+                rclpy.ok()
+                and self.active_goal_handle is goal_handle
+                and target_proximity_mm is None
+                and (time.time() - precheck_start) < 1.0
+            ):
+                time.sleep(0.02)
+                target_proximity_mm = self._current_target_proximity_mm()
+
+            if target_proximity_mm is not None and target_proximity_mm <= self.proximity_success_mm:
+                self._align_to_zero_heading(goal_handle, result, target_proximity_mm, 'Goal canceled during initial alignment')
+                with self.lock:
+                    if self.active_goal_handle is goal_handle:
+                        self.active_goal_handle = None
+                        self.goal_target_type = None
+                        self.goal_object_id = -1
+                        self.goal_selected_obj = None
+                        self.tracker = None
+                        self.pending_toy_bbox = None
+                        self.lost_since = None
+                        self.lost_template = None
+
+                self._publish_target_info_inactive()
+                self.yolo_enable_pub.publish(Bool(data=True))
+                self.tracked_bbox_pub.publish(TrackedBbox())
+                self.cmd_pub.publish(Twist())
+                try:
+                    self.get_logger().info(
+                        f'Approach action completed: movement_success={result.movement_success} '
+                        f'proximity_success={result.proximity_success} message="{getattr(result, "movement_message", "")}"'
+                    )
+                except Exception:
+                    pass
+                return result
+
         # Hand control of WSKR/cmd_vel to the autopilot for the duration
         # of this goal. Autopilot drops its own state on enable so it
         # starts cleanly each episode.
@@ -1048,6 +1160,17 @@ class WSKRApproachActionServer(Node):
             feedback.whisker_lengths = self.latest_whiskers.tolist() if self.latest_whiskers is not None else []
             goal_handle.publish_feedback(feedback)
 
+            if self.goal_target_type == ApproachObject.Goal.TARGET_TOY:
+                target_proximity_mm = self._current_target_proximity_mm()
+                if target_proximity_mm is not None and target_proximity_mm <= self.proximity_success_mm:
+                    self._align_to_zero_heading(
+                        goal_handle,
+                        result,
+                        target_proximity_mm,
+                        'Goal canceled during alignment',
+                    )
+                    break
+
             # Reacquisition failure: DR says we should be staring at the target (inside
             # the ±reacquire_failure_deg cone) but vision has no bbox on the current frame.
             # Reacquisition-failure abort: only meaningful for TARGET_TOY.
@@ -1106,58 +1229,7 @@ class WSKRApproachActionServer(Node):
                 and float(np.min(self.latest_target_whiskers)) < self.proximity_success_mm
             ):
                 closest_mm = float(np.min(self.latest_target_whiskers))
-                # Immediate hard stop to Arduino
-                self.stop_pub.publish(Empty())
-
-                # Alignment loop: proportional control on heading until within deadband
-                align_start = time.time()
-                aligned = False
-                period = 1.0 / max(1.0, self._align_rate_hz)
-                while rclpy.ok() and (time.time() - align_start) < self._align_timeout_s:
-                    if goal_handle.is_cancel_requested:
-                        result.movement_success = False
-                        result.movement_message = 'Goal canceled during alignment'
-                        goal_handle.canceled()
-                        break
-
-                    # Choose heading source: fused heading (last_heading_deg)
-                    with self.lock:
-                        heading_deg = float(self.last_heading_deg)
-
-                    # Check deadband
-                    if abs(heading_deg) <= self._align_deadband_deg:
-                        aligned = True
-                        break
-
-                    # Compute yaw command (kp * error_rad) and clamp
-                    error_rad = math.radians(heading_deg)
-                    yaw_cmd = max(-self._align_max_rate_rad_s, min(self._align_max_rate_rad_s, self._align_kp * error_rad))
-                    tw = Twist()
-                    tw.angular.z = float(yaw_cmd)
-                    self.cmd_pub.publish(tw)
-
-                    time.sleep(period)
-
-                # Ensure we stop rotation
-                self.cmd_pub.publish(Twist())
-
-                if aligned:
-                    result.proximity_success = True
-                    result.movement_message = (
-                        f'Target bbox within {closest_mm:.0f} mm '
-                        f'(threshold {self.proximity_success_mm:.0f} mm)'
-                    )
-                    self.get_logger().info(
-                        f'Approach alignment succeeded: {result.movement_message} '
-                        f'movement_success={result.movement_success} proximity_success={result.proximity_success}'
-                    )
-                    goal_handle.succeed()
-                else:
-                    result.proximity_success = False
-                    result.movement_success = False
-                    result.movement_message = f'Alignment failed or timed out after {self._align_timeout_s:.1f}s'
-                    self.get_logger().warn(result.movement_message)
-                    goal_handle.abort()
+                self._align_to_zero_heading(goal_handle, result, closest_mm, 'Goal canceled during alignment')
                 break
 
             time.sleep(0.05)
