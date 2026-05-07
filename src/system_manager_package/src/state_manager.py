@@ -349,7 +349,16 @@ class StateManagerNode(Node):
     # ================================================================
 
     def _do_idle(self):
-        self.get_logger().info('Entering IDLE. Waiting for commands.')
+        self.get_logger().info('IDLE: cancelling current goals and publishing WSKR/stop')
+        # cancel active goals
+        for key, gh in list(getattr(self, '_current_goal_handles', {}).items()):
+            try:
+                gh.cancel_goal_async()
+            except Exception:
+                pass
+        # publish emergency stop
+        self._stop_pub.publish(Empty())
+        self.get_logger().info('IDLE: ready to accept new commands (search, approach_obj, etc.)')
 
     # ---- SEARCH ----
     def _do_search(self):
@@ -362,7 +371,7 @@ class StateManagerNode(Node):
             return
         goal = WskrSearch.Goal()
         goal.target_type = WskrSearch.Goal.TARGET_TOY
-        goal.aruco_marker_id = self.get_parameter('sm_box_aruco_id').value
+        goal.target_id = self.get_parameter('sm_box_aruco_id').value
         goal.timeout_sec = self.get_parameter('search_timeout_sec').value
         future = self._search_ac.send_goal_async(goal)
         future.add_done_callback(self._on_search_accepted)
@@ -600,7 +609,7 @@ class StateManagerNode(Node):
             return
         goal = WskrSearch.Goal()
         goal.target_type = WskrSearch.Goal.TARGET_BOX
-        goal.aruco_marker_id = self.get_parameter('sm_box_aruco_id').value
+        goal.target_id = self.get_parameter('sm_box_aruco_id').value
         goal.timeout_sec = self.get_parameter('search_timeout_sec').value
         fut = self._search_ac.send_goal_async(goal)
         fut.add_done_callback(self._on_find_box_accepted)
