@@ -122,7 +122,7 @@ AUTOPILOT_PROXIMITY_SPEED_MIN = 0.1             # drive speed scale floor at min
 # ╚══════════════════════════════════════════════════════════════════╝
 
 APPROACH_TIMEOUT_SEC = 999.0                    # hard timeout for a single approach goal (s)
-APPROACH_PROXIMITY_SUCCESS_MM = 120.0            # target-whisker distance for goal success (mm)
+APPROACH_PROXIMITY_SUCCESS_MM = 65.0            # target-whisker distance for goal success (mm)
 APPROACH_TARGET_LOST_TIMEOUT_SEC = 7.0          # abort after this long without reacquiring target (s)
 APPROACH_REACQUIRE_THRESHOLD = 0.55             # template-match NCC threshold for re-acquisition
 APPROACH_REACQUIRE_FAILURE_DEG = 30.0           # heading cone inside which reacquire-abort fires (deg)
@@ -164,8 +164,8 @@ SELECTION_CLASS_PRIORITIES = [                  # class ranking: lower index = h
     'rectangular_prism', # +15 Points per shape
     'triangular_prism', # +10 Points per shape
     'cube', # +5 Points per shape
-    'cylinder', # -5 Points per shape (comment out for friday challenge)
-    'pyramid', # -5 Points per shape (comment out for friday challenge)
+    # 'cylinder', # -5 Points per shape (comment out for friday challenge)
+    # 'pyramid', # -5 Points per shape (comment out for friday challenge)
 
 ]
 SELECTION_MIN_CONFIDENCE = 0.5                 # discard detections below this confidence
