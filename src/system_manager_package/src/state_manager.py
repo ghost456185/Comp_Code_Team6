@@ -137,6 +137,7 @@ from system_manager_package.constants import (
     SM_BOX_ARUCO_ID,
     SEARCH_TIMEOUT_SEC,
     VISION_DEBOUNCE_FRAMES,
+    VISION_DROPOUT_GRACE_PERIOD_S,
 )
 from robot_interfaces.msg import ImgDetectionData
 
@@ -217,6 +218,7 @@ class StateManagerNode(Node):
         self._vision_stable_count = 0
         self._vision_loss_count = 0
         self._vision_last_stable_selected = None
+        self._vision_loss_start_time = None
         self.create_subscription(ImgDetectionData, 'vision/selected_object', self._on_selected_object, 10)
 
         self.get_logger().info(
@@ -370,20 +372,32 @@ class StateManagerNode(Node):
 
         with self._lock:
             if not has_det:
-                # No detection in this frame: increment loss counter
+                # No detection in this frame: start/continue the time-based
+                # dropout grace period. Keep the last stable object alive until
+                # the grace period expires, so brief near-field vision loss does
+                # not immediately clear the FSM's selected_object.
                 self._vision_loss_count += 1
                 self._vision_stable_count = 0
                 self._vision_candidate_class = None
-                # Only clear selected_object after sustained loss
-                if self._vision_loss_count >= max(1, self._vision_debounce_frames):
+
+                now = time.monotonic()
+                if self._vision_loss_start_time is None:
+                    self._vision_loss_start_time = now
+                    return
+
+                elapsed = now - self._vision_loss_start_time
+                if elapsed >= float(VISION_DROPOUT_GRACE_PERIOD_S):
                     if self.selected_object is not None:
-                        self.get_logger().info('Vision selection lost (stale) — holding previous state until stable')
+                        self.get_logger().info(
+                            f'Vision selection lost for {elapsed:.1f}s (>= {VISION_DROPOUT_GRACE_PERIOD_S:.1f}s grace) — clearing selected_object'
+                        )
                     self.selected_object = None
-                # otherwise keep last stable selection
+                    self._vision_loss_start_time = None
                 return
 
             # There is a detection in this frame — reset loss counter
             self._vision_loss_count = 0
+            self._vision_loss_start_time = None
 
             if self._vision_candidate_class == cls:
                 self._vision_stable_count += 1

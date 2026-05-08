@@ -455,6 +455,12 @@ class GraspActionNode(Node):
         # ====================================================================
         # !!! END REWRITTEN STAGE 1 !!!
         # ====================================================================
+        # IMPORTANT: At this point, all vision-dependent data is frozen:
+        #   - goal_xyz = (x_mm, y_mm, z_mm) in arm frame (mm)
+        #   - signed_ar from base bbox rotation inference
+        #   - These values are used for Stages 2-8 without re-querying vision.
+        # If the vision model drops out after Stage 1 begins, the grasp pipeline
+        # continues unaffected using this frozen pose. See GRASP_CONTINUE_STALE_POSE_SEC.
 
         # ---- STAGE 2: Q-learning wrist policy ----
         self._publish_feedback(goal_handle, "stage_2_wrist_policy", 0.15)

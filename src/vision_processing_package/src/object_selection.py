@@ -9,8 +9,15 @@ Exposes the selection two ways:
      calls this during the SELECT state.
   2. ``vision/selected_object`` (continuous stream) — republishes the
      current best pick on every incoming frame for dashboard overlays.
+
+Grace-period behavior for close-range vision loss:
+  - If YOLO detections drop out (empty frame), the node tolerates up to
+    VISION_DROPOUT_GRACE_PERIOD_S of silence. During this window, it keeps
+    republishing the last stable selection so downstream doesn't abort.
+  - After the grace period expires, it publishes empty and resets state.
 """
 from typing import Optional
+import time
 
 import rclpy
 from geometry_msgs.msg import Point
@@ -24,6 +31,7 @@ from system_manager_package.constants import (
     SELECTION_CLASS_PRIORITIES,
     SELECTION_MIN_CONFIDENCE,
     VISION_DEBOUNCE_FRAMES,
+    VISION_DROPOUT_GRACE_PERIOD_S,
 )
 
 
@@ -56,6 +64,13 @@ class ObjectSelection(Node):
         self._candidate_class: Optional[str] = None
         self._stable_count: int = 0
         self._last_stable_selected: Optional[ImgDetectionData] = None
+        
+        # Grace-period tracking for close-range vision dropout tolerance.
+        # When YOLO detections are empty, we start a timer. If the grace
+        # period hasn't expired, we keep republishing the last stable object
+        # instead of clearing it immediately.
+        self._dropout_grace_period_s = VISION_DROPOUT_GRACE_PERIOD_S
+        self._last_empty_frame_time: Optional[float] = None
 
         self.srv = self.create_service(
             SelectObject, 'select_object_service', self._handle_select_service,
@@ -71,7 +86,8 @@ class ObjectSelection(Node):
 
         self.get_logger().info(
             f"ObjectSelection ready (priorities={self.class_priorities}, "
-            f"min_confidence={self.min_confidence:.2f}). "
+            f"min_confidence={self.min_confidence:.2f}, "
+            f"dropout_grace_period={self._dropout_grace_period_s:.1f}s). "
             "Service: select_object_service; stream: vision/selected_object."
         )
 
@@ -155,22 +171,62 @@ class ObjectSelection(Node):
     # --------------------------------------------------------- subscription
 
     def _on_detections(self, msg: ImgDetectionData) -> None:
-        """Cache the latest frame and publish the streaming selection."""
+        """Cache the latest frame and publish the streaming selection.
+        
+        If detections are empty (idx=None), start/track the dropout grace period.
+        While within the grace period, keep republishing the last stable object
+        to tolerate brief vision dropouts (e.g., close-range occlusions). After
+        the grace period expires, clear selection and reset state.
+        """
         self._latest_detections = msg
 
         idx = self._pick_best(msg)
         if idx is None:
-            empty = ImgDetectionData()
-            empty.image_width = msg.image_width
-            empty.image_height = msg.image_height
-            # No candidate this frame: reset candidate state and publish empty
-            self._candidate_class = None
-            self._stable_count = 0
-            self._last_stable_selected = None
-            self.selected_pub.publish(empty)
+            # No candidate this frame — handle via grace period.
+            now = time.time()
+            if self._last_empty_frame_time is None:
+                # First empty frame in a sequence
+                self._last_empty_frame_time = now
+                grace_elapsed = 0.0
+            else:
+                grace_elapsed = now - self._last_empty_frame_time
+            
+            if grace_elapsed < self._dropout_grace_period_s:
+                # Still within grace period — keep republishing the last stable
+                # selection if it exists, so downstreams don't see a flicker/abort.
+                if self._last_stable_selected is not None:
+                    self.selected_pub.publish(self._last_stable_selected)
+                    if grace_elapsed == 0.0:
+                        self.get_logger().debug(
+                            f"Vision dropout detected. Keeping last stable object active "
+                            f"({self._dropout_grace_period_s}s grace period)."
+                        )
+                else:
+                    # No prior stable selection to reuse
+                    empty = ImgDetectionData()
+                    empty.image_width = msg.image_width
+                    empty.image_height = msg.image_height
+                    self.selected_pub.publish(empty)
+            else:
+                # Grace period expired — clear everything and publish empty.
+                if grace_elapsed < self._dropout_grace_period_s + 1.0:
+                    # Only log once per expiry (within 1 sec of the boundary)
+                    self.get_logger().warn(
+                        f"Vision dropout exceeded grace period ({grace_elapsed:.1f}s > {self._dropout_grace_period_s}s). "
+                        "Clearing selection."
+                    )
+                empty = ImgDetectionData()
+                empty.image_width = msg.image_width
+                empty.image_height = msg.image_height
+                self._candidate_class = None
+                self._stable_count = 0
+                self._last_stable_selected = None
+                self._last_empty_frame_time = None
+                self.selected_pub.publish(empty)
             return
-        # Candidate detected — perform debounce by class name to avoid
-        # rapid class-switching from noisy detections.
+        
+        # Candidate detected — reset dropout timer and perform debounce by class.
+        self._last_empty_frame_time = None
         cls = (
             str(msg.class_name[idx])
             if idx < len(msg.class_name)

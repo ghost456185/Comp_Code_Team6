@@ -122,7 +122,7 @@ AUTOPILOT_PROXIMITY_SPEED_MIN = 0.1             # drive speed scale floor at min
 # ╚══════════════════════════════════════════════════════════════════╝
 
 APPROACH_TIMEOUT_SEC = 999.0                    # hard timeout for a single approach goal (s)
-APPROACH_PROXIMITY_SUCCESS_MM = 75.0            # target-whisker distance for goal success (mm)
+APPROACH_PROXIMITY_SUCCESS_MM = 120.0            # target-whisker distance for goal success (mm)
 APPROACH_TARGET_LOST_TIMEOUT_SEC = 7.0          # abort after this long without reacquiring target (s)
 APPROACH_REACQUIRE_THRESHOLD = 0.55             # template-match NCC threshold for re-acquisition
 APPROACH_REACQUIRE_FAILURE_DEG = 30.0           # heading cone inside which reacquire-abort fires (deg)
@@ -168,7 +168,7 @@ SELECTION_CLASS_PRIORITIES = [                  # class ranking: lower index = h
     'pyramid', # -5 Points per shape (comment out for friday challenge)
 
 ]
-SELECTION_MIN_CONFIDENCE = 0.7                 # discard detections below this confidence
+SELECTION_MIN_CONFIDENCE = 0.5                 # discard detections below this confidence
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  SEARCH BEHAVIOR  (wander + detect action server)                ║
@@ -203,6 +203,24 @@ SM_DELAY_WANDER = 0.1                            # near-instant: wander is fire-
 
 SM_MAX_GRASP_RETRIES = 1                         # times to retry a failed grasp before returning to SEARCH
 SM_BOX_ARUCO_ID = 0                              # ArUco marker ID that identifies the drop box
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  VISION DROPOUT TOLERANCE  (close-range near-field loss)         ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+# Grace period (seconds) to keep the last valid object active in the
+# selection stream if the YOLO detector loses it briefly (e.g., when
+# object gets too close to camera, ~<100mm). Avoids hard aborts when
+# vision temporarily clips out. Works by republishing the cached
+# last_stable_selected if empty frames arrive within this window.
+VISION_DROPOUT_GRACE_PERIOD_S = 10.0             # max time to tolerate empty frames before clearing (s)
+
+# Grace period (seconds) to allow the grasp pipeline to continue from
+# its Stage 1 frozen pose even if vision becomes unavailable mid-execution
+# (e.g., Stage 2-8). Once grasp starts, it relies on the captured bbox/pose
+# rather than re-querying the detector. This setting is mainly informational
+# and reserves potential future logic to ignore stale vision requests.
+GRASP_CONTINUE_STALE_POSE_SEC = 999.0           # effectively unlimited; grasp always uses frozen Stage 1 pose
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  XARM — HARDWARE NODE                                            ║
