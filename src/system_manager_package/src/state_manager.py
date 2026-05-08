@@ -206,7 +206,7 @@ class StateManagerNode(Node):
         # retry / backoff parameters
         self._approach_retries = 0
         self._grasp_retries = 0
-        self._max_approach_retries = 2
+        self._max_approach_retries = 5  # Increased from 2 to tolerate unreliable approach_object action
         self._approach_backoff_base = 2.0
         self._approach_backoff_multiplier = 2.0
         self._grasp_backoff_base = 1.5
@@ -219,6 +219,10 @@ class StateManagerNode(Node):
         self._vision_loss_count = 0
         self._vision_last_stable_selected = None
         self._vision_loss_start_time = None
+        # Cache for last stable object: fallback for continued approach if vision drops during approach phase
+        self._last_stable_object_for_approach = None
+        self._vision_loss_attempt_redetect = 0  # track re-detection attempts before giving up
+        self._max_vision_loss_redetect_attempts = 2  # max retries to recover vision before clearing target
         self.create_subscription(ImgDetectionData, 'vision/selected_object', self._on_selected_object, 10)
 
         self.get_logger().info(
@@ -355,6 +359,12 @@ class StateManagerNode(Node):
         `self.selected_object` only after the selection is stable for
         `_vision_debounce_frames` consecutive callbacks. Protect changes
         with the FSM lock.
+        
+        Enhanced robustness:
+        - Tolerates longer vision dropout gaps (VISION_DROPOUT_GRACE_PERIOD_S)
+        - Caches last stable object for fallback approach if vision drops
+        - Logs all transitions for debugging
+        - Attempts re-detection recovery before truly giving up
         """
         # Determine if this message contains a valid selection
         try:
@@ -383,21 +393,42 @@ class StateManagerNode(Node):
                 now = time.monotonic()
                 if self._vision_loss_start_time is None:
                     self._vision_loss_start_time = now
+                    self.get_logger().debug(f'Vision loss started: no detection in frame (state={self._state.name})')
                     return
 
                 elapsed = now - self._vision_loss_start_time
-                if elapsed >= float(VISION_DROPOUT_GRACE_PERIOD_S):
+                # Increased grace period tolerance for more robust near-field approach
+                grace_period = float(VISION_DROPOUT_GRACE_PERIOD_S)
+                if elapsed >= grace_period:
+                    self.get_logger().warning(
+                        f'Vision selection lost for {elapsed:.1f}s (>= {grace_period:.1f}s grace). '
+                        f'Current state: {self._state.name}. Clearing selected_object.'
+                    )
                     if self.selected_object is not None:
+                        self._last_stable_object_for_approach = self.selected_object
                         self.get_logger().info(
-                            f'Vision selection lost for {elapsed:.1f}s (>= {VISION_DROPOUT_GRACE_PERIOD_S:.1f}s grace) — clearing selected_object'
+                            f'Cached last stable object for potential fallback approach before clearing.'
                         )
                     self.selected_object = None
                     self._vision_loss_start_time = None
+                else:
+                    # Still within grace period: provide gradual feedback
+                    if elapsed > grace_period * 0.7:
+                        self.get_logger().debug(
+                            f'Vision loss {elapsed:.1f}s / {grace_period:.1f}s (approaching grace period limit)'
+                        )
                 return
 
-            # There is a detection in this frame — reset loss counter
+            # There is a detection in this frame — reset loss counter and recovery state
+            if self._vision_loss_start_time is not None:
+                elapsed = time.monotonic() - self._vision_loss_start_time
+                self.get_logger().info(
+                    f'Vision re-acquired after {elapsed:.1f}s of dropout. '
+                    f'Resuming stable object tracking.'
+                )
             self._vision_loss_count = 0
             self._vision_loss_start_time = None
+            self._vision_loss_attempt_redetect = 0  # reset re-detection counter when vision returns
 
             if self._vision_candidate_class == cls:
                 self._vision_stable_count += 1
@@ -415,7 +446,10 @@ class StateManagerNode(Node):
                 except Exception:
                     prev_label = None
                 if prev_label != cls:
-                    self.get_logger().info(f'Vision selection stabilized on "{cls}" (frames={self._vision_stable_count})')
+                    self.get_logger().info(
+                        f'Vision selection stabilized on "{cls}" (frames={self._vision_stable_count}). '
+                        f'State: {self._state.name}'
+                    )
                 self.selected_object = msg
             else:
                 # Not stable yet: do not overwrite the last stable selection
@@ -517,18 +551,33 @@ class StateManagerNode(Node):
             return
         if getattr(resp, 'success', False):
             self.selected_object = getattr(resp, 'selected_obj', None)
-            self.get_logger().info('Selected object, approaching')
+            self.get_logger().info(
+                f'✓ Object selected: {self._selected_object_summary()}. Transitioning to APPROACH_OBJ.'
+            )
             self._transition(RobotState.APPROACH_OBJ)
         else:
-            self.get_logger().info('No selectable object — resuming SEARCH')
+            self.get_logger().info('✗ No selectable object found in current frame. Resuming SEARCH.')
             self._transition(RobotState.SEARCH)
 
     # ---- APPROACH_OBJ ----
     def _do_approach_obj(self):
+        self.get_logger().info(
+            f'APPROACH_OBJ: entering state. Retry count: {self._approach_retries}/{self._max_approach_retries}'
+        )
         if self.selected_object is None:
-            self.get_logger().warning('No selected object to approach — going to SELECT')
-            self._transition(RobotState.SELECT)
-            return
+            self.get_logger().warning(
+                'No selected object to approach. '
+                'Fallback to last stable object if available, else return to SELECT'
+            )
+            if self._last_stable_object_for_approach is not None:
+                self.get_logger().info(
+                    'Using cached last stable object for approach fallback. '
+                    'Object: ' + self._selected_object_summary()
+                )
+                self.selected_object = self._last_stable_object_for_approach
+            else:
+                self._transition(RobotState.SELECT)
+                return
         delay = self.get_parameter('sm_delay_approach_obj').value
         time.sleep(delay)
         if not self._approach_ac.wait_for_server(timeout_sec=5.0):
@@ -539,78 +588,101 @@ class StateManagerNode(Node):
         goal.target_type = ApproachObject.Goal.TARGET_TOY
         goal.object_id = 0
         goal.selected_obj = self.selected_object
-        self.get_logger().info(f'_do_approach_obj: sending approach goal with selected_object={self._selected_object_summary()}')
+        self.get_logger().info(
+            f'Sending APPROACH goal (attempt {self._approach_retries + 1}/{self._max_approach_retries}): '
+            f'object={self._selected_object_summary()}'
+        )
         fut = self._approach_ac.send_goal_async(goal)
-        self.get_logger().info('_do_approach_obj: goal sent, adding accepted callback')
         fut.add_done_callback(self._on_approach_accepted)
 
     def _on_approach_accepted(self, future):
-        self.get_logger().info('_on_approach_accepted: ENTERED callback')
         try:
             goal_handle = future.result()
-            self.get_logger().info(f'_on_approach_accepted: goal_handle result={goal_handle.accepted}')
         except Exception as e:
-            self.get_logger().error(f'_on_approach_accepted: exception getting goal_handle: {e}')
+            self.get_logger().error(
+                f'Approach goal rejected by server (attempt {self._approach_retries + 1}/{self._max_approach_retries}): {e}'
+            )
             self._transition(RobotState.ERROR)
             return
         if not goal_handle.accepted:
-            self.get_logger().error('Approach goal rejected')
+            self.get_logger().error(
+                f'Approach goal server rejected goal (attempt {self._approach_retries + 1}/{self._max_approach_retries}). '
+                f'Object: {self._selected_object_summary()}'
+            )
             self._transition(RobotState.ERROR)
             return
-        self.get_logger().info('_on_approach_accepted: goal accepted, registering result callback')
+        self.get_logger().info(
+            f'✓ Approach goal accepted by server. Waiting for result...'
+        )
         self._current_goal_handles['approach_obj'] = goal_handle
         goal_handle.get_result_async().add_done_callback(self._on_approach_result)
 
     def _on_approach_result(self, future):
-        self.get_logger().info('_on_approach_result: ENTERED callback')
         try:
             result = future.result().result
-            self.get_logger().info('_on_approach_result: got result object successfully')
         except Exception as e:
-            self.get_logger().error(f'Approach result error: {e}')
+            self.get_logger().error(
+                f'Approach goal exception (attempt {self._approach_retries + 1}/{self._max_approach_retries}): {e}'
+            )
             self._transition(RobotState.SEARCH)
             return
         self._current_goal_handles.pop('approach_obj', None)
-        # Debug log the raw result fields
+        # Extract and log detailed result
         prox_success = getattr(result, 'proximity_success', False)
         move_success = getattr(result, 'movement_success', False)
         move_msg = getattr(result, 'movement_message', '')
-        self.get_logger().info(
-            f'_on_approach_result: proximity_success={prox_success} '
-            f'movement_success={move_success} message="{move_msg}"'
+        self.get_logger().debug(
+            f'Approach result (attempt {self._approach_retries + 1}/{self._max_approach_retries}): '
+            f'proximity_success={prox_success}, movement_success={move_success}, message="{move_msg}"'
         )
+        
         if prox_success or move_success:
             # success: reset retries and continue
             self._approach_retries = 0
             self.get_logger().info(
-                f'Approach succeeded (prox={prox_success}, move={move_success}) — '
-                f'calling _request_grasp'
+                f'✓ Approach succeeded (prox={prox_success}, move={move_success}). '
+                f'Proceeding to grasp.'
             )
             self._request_grasp('approach_success')
         else:
-            self.get_logger().info(
-                f'Approach failed: prox_success={prox_success} move_success={move_success} — '
-                f'will retry or give up'
-            )
-            # failed: retry with backoff up to limit
+            # Failed: log failure mode and retry
+            failure_reason = f'prox={prox_success} move={move_success} msg="{move_msg}"'
             self._approach_retries += 1
+            
             if self._approach_retries <= self._max_approach_retries:
                 delay = self._approach_backoff_base * (
                     self._approach_backoff_multiplier ** (self._approach_retries - 1)
                 )
-                self.get_logger().info(f'Approach failed — retry #{self._approach_retries} in {delay:.1f}s')
+                self.get_logger().warning(
+                    f'✗ Approach failed ({failure_reason}). '
+                    f'Retry {self._approach_retries}/{self._max_approach_retries} in {delay:.1f}s'
+                )
                 self._schedule_retry(self._do_approach_obj, delay)
             else:
-                self.get_logger().info('Approach failed — exceeded retries, issuing stop and returning to IDLE')
+                self.get_logger().error(
+                    f'✗ Approach exhausted all {self._max_approach_retries} retries '
+                    f'(last failure: {failure_reason}). Aborting to IDLE.'
+                )
                 self._approach_retries = 0
+                self._last_stable_object_for_approach = None  # clear fallback cache when truly giving up
                 self._stop_pub.publish(Empty())
                 self._transition(RobotState.IDLE)
 
     # ---- GRASP ----
     def _do_grasp(self):
         if self.selected_object is None:
-            self._reject_grasp('GRASP_REJECTED_NO_OBJECT in GRASP handler')
-            return
+            self.get_logger().warning(
+                'GRASP: selected_object is None. This may be due to vision loss during approach. '
+                'Attempting fallback to cached last stable object...'
+            )
+            if self._last_stable_object_for_approach is not None:
+                self.get_logger().info(
+                    f'Using cached last stable object for grasp: {self._selected_object_summary()}'
+                )
+                self.selected_object = self._last_stable_object_for_approach
+            else:
+                self._reject_grasp('GRASP_REJECTED_NO_OBJECT in GRASP handler')
+                return
         delay = self.get_parameter('sm_delay_grasp').value
         time.sleep(delay)
         if not self._grasp_ac.wait_for_server(timeout_sec=0.0):
@@ -620,6 +692,9 @@ class StateManagerNode(Node):
         goal.id = self._extract_selected_object_id(self.selected_object)
         goal.selected_obj = self.selected_object
         self._grasp_feedback_success = None
+        self.get_logger().info(
+            f'Sending GRASP goal for object: {self._selected_object_summary()}'
+        )
         fut = self._grasp_ac.send_goal_async(goal)
         fut.add_done_callback(self._on_grasp_accepted)
 
@@ -673,7 +748,7 @@ class StateManagerNode(Node):
             success = bool(getattr(result, 'current_number', 0))
         if success:
             self._grasp_retries = 0
-            self.get_logger().info('Grasp succeeded — FIND_BOX')
+            self.get_logger().info('✓ Grasp succeeded. Proceeding to FIND_BOX.')
             self._transition(RobotState.FIND_BOX)
         else:
             # retry grasp by repositioning: transitioning back to APPROACH_OBJ
@@ -681,10 +756,14 @@ class StateManagerNode(Node):
             max_retries = self.get_parameter('sm_max_grasp_retries').value
             if self._grasp_retries <= max_retries:
                 delay = self._grasp_backoff_base * (self._grasp_backoff_multiplier ** (self._grasp_retries - 1))
-                self.get_logger().info(f'Grasp failed — retry #{self._grasp_retries} in {delay:.1f}s by re-approaching')
+                self.get_logger().warning(
+                    f'✗ Grasp failed. Re-approaching for retry {self._grasp_retries}/{max_retries} in {delay:.1f}s'
+                )
                 self._schedule_retry(lambda: self._transition(RobotState.APPROACH_OBJ), delay)
             else:
-                self.get_logger().info('Grasp failed — exceeded retries, issuing stop and returning to IDLE')
+                self.get_logger().error(
+                    f'✗ Grasp exhausted all {max_retries} retries. Aborting to IDLE.'
+                )
                 self._grasp_retries = 0
                 self._stop_pub.publish(Empty())
                 self._transition(RobotState.IDLE)

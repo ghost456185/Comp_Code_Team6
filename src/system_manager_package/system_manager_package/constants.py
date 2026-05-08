@@ -213,7 +213,8 @@ SM_BOX_ARUCO_ID = 0                              # ArUco marker ID that identifi
 # object gets too close to camera, ~<100mm). Avoids hard aborts when
 # vision temporarily clips out. Works by republishing the cached
 # last_stable_selected if empty frames arrive within this window.
-VISION_DROPOUT_GRACE_PERIOD_S = 10.0             # max time to tolerate empty frames before clearing (s)
+# Increased to 20.0 for robustness against sustained vision dropouts during approach.
+VISION_DROPOUT_GRACE_PERIOD_S = 20.0             # max time to tolerate empty frames before clearing (s)
 
 # Grace period (seconds) to allow the grasp pipeline to continue from
 # its Stage 1 frozen pose even if vision becomes unavailable mid-execution
@@ -302,5 +303,4 @@ FOXGLOVE_OVERLAY_THROTTLE_HZ = 5.0              # WSKR overlay throttle rate (Hz
 
 # Failed Testing to try and flip other robots:
 
-# ros2 service call /xarm/set_joint_state robot_interfaces/srv/SetJointState "{angles: [0, 5, 70, 70, -90, 0], servo_ids: [1,2,3,4,5,6], duration_vector: [1000.0, 1000.0,1000.0,1000.0,1000.0,1000.0], radians: false}"
-# ros2 service call /xarm/set_joint_state robot_interfaces/srv/SetJointState "{angles: [0, 5, 0, 0, 0, 0], servo_ids: [1,2,3,4,5,6], duration_vector: [100.0, 100.0,100.0,100.0,100.0,100.0], radians: false}"
+# ros2 service call /xarm/set_joint_state robot_interfaces/srv/SetJointState "{angles: [0, 5, 70, 70, -90, 0], servo_ids: [1,2,3,4,5,6], duration_vector: [1000.0, 1000.0,1000.0,1000.0,1000.0,1000.0], radians: false}"; ros2 service call /xarm/set_joint_state robot_interfaces/srv/SetJointState "{angles: [0, 5, 0, 0, 0, 0], servo_ids: [1,2,3,4,5,6], duration_vector: [100.0, 100.0,100.0,100.0,100.0,100.0], radians: false}"
